@@ -33,6 +33,9 @@ import soundfile as sf
 from datetime import date
 import os
 
+#---- create logfile directory if not already existing
+os.makedirs('logfiles/', exist_ok=True)
+
 #---- open GUI to enter participant information
 trial_list_dir = 'trial_lists/' # set directory for relevant trial list files
 expName = 'AuditPrePro'

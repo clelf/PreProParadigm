@@ -11,6 +11,17 @@ import matplotlib.patches as mpatches
 import os
 from pykalman import KalmanFilter
 
+'''
+GENERAL
+
+- process: x_t = a*x_t-1 + d + w_t, x_t ~ N(0, sigma_q**2)
+- a = 1-(1/tau), d = mu/tau
+- stat_std = (sigma_q*tau)/sqrt(2*tau-1)
+    --> sigma_q = (stat_std*sqrt(2*tau-1))/tau
+- d_eff = (log(mu_std)-log(mu_dev))/stat_std
+
+'''
+
 class trials_master:
     '''data generation process for auditPrePro task'''
 
@@ -18,26 +29,24 @@ class trials_master:
         self.params = {
                 "participant_nr": '01',
                 "n_sessions": 6,
-                "n_trials": 60,
+                "n_trials": 60, # number of trials per run
                 "rules": [0, 1, 2],
-                "diag": 0.8,
-                "tr_3": 0.1,
-                "tr_3_3": 0,
-                "frequencies": [[1000, 1050], [700, 750]],
-                "taus": [16, 40, 160, 240],
-                "dpos": [[2,3,4],[4,5,6],[0]],
+                "diag": 0.8, # self-trinsition of rules 1 and 2
+                "tr_3": 0.1, # transition rules to trials w/o deviant
+                "tr_3_3": 0, # transition pprobability trials w/o deviant
+                "frequencies": [[1000, 1050], [700, 750]], # mu values for std and dev process
+                "taus": [16, 40, 160, 240], # taus in each session
+                "dpos": [[2,3,4],[4,5,6],[0]], # deviant positions per rule
                 "contexts": ['std', 'dev'], 
-                "stat_std": 25,
-                "si_r": 10,
-                "duration_tones": 0.1,
-                "isi": 0.65,
-                "t_tones": True,   
-                "dev_t_tones": False, 
-                "dev_process": True,
-                "n_kalman": [8, 16, 24, 32, 40, 48, 56]
+                "stat_std": 25, # stationary standard deviation of the processes
+                "si_r": 10, # observation noise
+                "duration_tones": 0.1, # stimulus duration
+                "isi": 0.65, # inter-stimulus interval
+                "t_tones": True, # use tones as time steps 
+                "dev_t_tones": False, # do not use tones as time steps for deviant
+                "dev_process": True, # use a process for the deviants
+                "n_kalman": [8, 16, 24, 32, 40, 48, 56] # time steps to use for Kalman filter
             }
-
-    ###------------ functions to sample the next Markov state (for the rules)
 
     def sample_next_markov_state(self, current_state, states_values, states_trans_matrix):
             '''Clems function to sample the next Markov state from current state, state values and transition matrix'''
@@ -88,6 +97,8 @@ class trials_master:
     def prep_dirs(self):
         '''create output directories'''
 
+        os.makedirs('trial_lists/', exist_ok=True)
+
         sub_dir = f"trial_lists/sub-{self.params['participant_nr']}"
         os.makedirs(sub_dir, exist_ok=True)
 
@@ -97,7 +108,7 @@ class trials_master:
                                                                                                                                                                                                                                                                                                                             
     def get_task_structure(self):
         '''create a manually predefined order of mus and taus,
-        NOTE: only balanced for 6 sessions'''
+        NOTE: only roughly balanced for 6 sessions, might need change'''
 
         mu_tones = []
 
@@ -130,7 +141,7 @@ class trials_master:
                 tau_std[rep]=tau_row
 
         tau_std = np.array(tau_std)
-        #perm = np.random.permutation(len(mu_tones)) # shuffle sessions
+        perm = np.random.permutation(len(mu_tones)) # shuffle sessions
         perm = np.array(range(self.params["n_sessions"])) # for test reasons keep order
         mu_tones = mu_tones[perm].tolist()
         tau_std = tau_std[perm]
@@ -149,17 +160,17 @@ class trials_master:
         run_length = self.params["n_trials"] * 8
         n_runs = 4
         
-        obs_std = obs.copy()
+        obs_std = obs.copy() # use the generated observations
         obs_std[dpos_seq_long_flat_full == 1] = np.nan # we don't observe the standard in the position of the deviant
 
-        iter = -1 # loop index
+        iter = -1 
 
         for n in self.params["n_kalman"]:    
 
             iter+= 1    
             b_estimated_values = []
 
-            for run in range(n_runs): # Kalman filter for each run
+            for run in range(n_runs):
 
                 tau_init = None
                 b_init = None
@@ -224,6 +235,7 @@ class trials_master:
     def plot_kalman(self, figy, axy): 
         '''plots kalman results across sessions and n'''
 
+        # just adding some labels and plot save the full plot across sessions
         for n in range(len(self.params["n_kalman"])):
             axy[n, 0].set_ylabel(f'n = {self.params["n_kalman"][n]}', fontsize=12, weight='bold')
             
@@ -247,6 +259,7 @@ class trials_master:
 
 
     def generate_sessions(self):
+        '''script for generating the trial sequence'''
 
         self.prep_dirs()
 
@@ -296,7 +309,6 @@ class trials_master:
             dpos_seq_long_flat_full = []
             rules_seq_full = []
             rule_init = np.random.choice(self.params["rules"][0:-1]) # draw random rule to start
-            # print(rule_init)
 
             dev_lim = [] # to collect dev states in case of dev_process = False
             proc_noise = [[[], []] for _ in range(len(tau_std))]
@@ -306,9 +318,11 @@ class trials_master:
 
             for i in range(0, len(tau_std[s])): # for each tau create a sequence of rules
 
+                # compute sigma q for the standard based on current tau and stationary standard deviation
                 si_q = (self.params["stat_std"]*((2 * tau_std[s][i] - 1) ** 0.5))/tau_std[s][i]
                 si_q_arr.append(si_q)
                 
+                # create markov sequences until result is roughly balanced
                 unbalanced = True
                 while unbalanced == True:
 
@@ -379,6 +393,7 @@ class trials_master:
 
                     # this would match the stationary standard deviation of the deviant to that of the standard in case of different taus
                     if self.params["t_tones"] == True and self.params["dev_t_tones"] == False:
+                        # compute sigma q deviant based on tau and stationary
                         si_q_dev = ((si_q * tau_std[s][i] / ((2 * tau_std[s][i] - 1) ** 0.5))*((2*tau_dev[s][i] - 1)**0.5))/tau_dev[s][i]
                         # print(f"sigma_q deviant: {si_q_dev}")
                     else:
@@ -426,6 +441,7 @@ class trials_master:
                             states[i][c][t] = states[i][c][t - 1] + 1 / tau_dev[s][i] * (mu_std_dev[c] - states[i][c][t - 1]) + w[t - 1]
 
                 # compute effect size SNR
+                # NOTE: this could be used as an input parameter to sample mus?
                 d_eff = (math.log(mu_std_dev[1])-math.log(mu_std_dev[0]))/self.params["stat_std"]
             
             
@@ -782,10 +798,9 @@ class trials_master:
                     t_3_3 += 1           
 
             ###------------ add ITI
+            # increased because of the slider ratings in behavioral experiment --> decrease for fmri
 
-            iti_range = np.arange(7, 12, 0.5) # increased because of the slider ratings in behavioral experiment --> decrease for fmri
-            dev_dist_dev =[]
-            dev_dist_s = []
+            iti_range = np.arange(7, 12, 0.5)
             ITI =[]
 
             for i in range(0,len(dpos_seq_full)):
@@ -824,14 +839,17 @@ class trials_master:
             trials_final['run_n'] = np.repeat([range(0,len(tau_std[s]))], self.params["n_trials"]*8)
             trials_final['session_n'] = [s]*self.params["n_trials"]*8*len(tau_std[s])
 
-            # maybe also record process and observation noise on each tone for sanity check?
             trials_final.to_csv(f'trial_lists/sub-{self.params['participant_nr']}/sub-{self.params['participant_nr']}_ses-{session_nr}_trials.csv', index=False, float_format="%.4f")
 
             session_duration = (((7*self.params["isi"])+(8*self.params["duration_tones"]))*self.params["n_trials"]*(len(tau_std[s]))) + sum(trials_final['ITI'][::8])
             print(f'Estimated session duration in minutes: {session_duration/60}')
 
+            ###------------ apply adaptation of Alex' script for Kalman filter
+
+            # apply for each session
             self.apply_kalman(s, obs, dpos_seq_long_flat_full, si_q_arr, mu_tones, tau_std, figy, axy, n_iter = 10, tau_inits = 3.0)
             
+        # plot across session
         self.plot_kalman(figy, axy)
 
 
@@ -839,10 +857,7 @@ if __name__ == "__main__":
     
     task = trials_master()
 
-    # Run comprehensive parameter estimation analysis
     print("=== Generating Trials ===")
-
-    # Run analysis with specific noise parameters
     task.generate_sessions()
 
 
