@@ -294,7 +294,7 @@ class KalmanEM:
                         b_true_array = b_true_values[valid_mask]
 
                         # Count points outside the (-2, 2) range
-                        out_of_range = np.sum((b_est_array < 700) | (b_est_array > 1000))
+                        out_of_range = np.sum((b_est_array < 300) | (b_est_array > 1500))
                         out_ratio = out_of_range / len(b_est_array) if len(b_est_array) > 0 else 0
 
                         # Plot with more transparency and specific color
@@ -302,7 +302,7 @@ class KalmanEM:
                                   color=colors[k], facecolors=colors[k])
 
                         # Add to legend
-                        legend_labels.append(f'σ_q={sigma_q} (out_rat={out_ratio:.2f})')
+                        legend_labels.append(f'σ_q={sigma_q_out:.2f} (out_rat={out_ratio:.2f})')
 
                 # Add identity line within the (-2, 2) range
                 ax.plot([300, 1500], [300, 1500], 'k--', alpha=0.5)
