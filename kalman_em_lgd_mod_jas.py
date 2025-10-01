@@ -305,7 +305,7 @@ class KalmanEM:
                         legend_labels.append(f'σ_q={sigma_q} (out_rat={out_ratio:.2f})')
 
                 # Add identity line within the (-2, 2) range
-                ax.plot([300, 1500], [300, 1300], 'k--', alpha=0.5)
+                ax.plot([300, 1500], [300, 1500], 'k--', alpha=0.5)
 
                 # Add legend in top-left corner
                 if legend_labels:
