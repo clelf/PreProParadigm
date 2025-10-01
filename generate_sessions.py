@@ -19,6 +19,7 @@ GENERAL
 - stat_std = (sigma_q*tau)/sqrt(2*tau-1)
     --> sigma_q = (stat_std*sqrt(2*tau-1))/tau
 - d_eff = (log(mu_std)-log(mu_dev))/stat_std
+- TODO: use d_eff to generate mus?
 
 '''
 
