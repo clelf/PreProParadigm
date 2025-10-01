@@ -38,7 +38,7 @@ class trials_master:
                 "taus": [16, 40, 160, 240], # taus in each session
                 "dpos": [[2,3,4],[4,5,6],[0]], # deviant positions per rule
                 "contexts": ['std', 'dev'], 
-                "stat_std": 25, # stationary standard deviation of the processes
+                "stat_std": 100, # stationary standard deviation of the processes
                 "si_r": 10, # observation noise
                 "duration_tones": 0.1, # stimulus duration
                 "isi": 0.65, # inter-stimulus interval
@@ -180,7 +180,7 @@ class trials_master:
                 
                 measurements = obs_std[start_idx:end_idx] # standard observations (incl. deviant position as nan)
 
-                measurements = ma.asarray(measurements)
+                measurements = ma.asarray(measurements).reshape(-1, 1)
                 measurements[np.isnan(measurements)] = ma.masked # mask deviant position for pykalman to handle as missing observation
 
                 if tau_init is None:
@@ -227,8 +227,8 @@ class trials_master:
             axy[iter, s].scatter(range(0,4), [val[0] for val in mu_tones[s]], alpha=0.4, s=30, color='blue', facecolors='blue')
             axy[iter, s].set_xticks(range(4)) 
             axy[iter, s].set_xticklabels([f'{tau_std[s][0]}', f'{tau_std[s][1]}', f'{tau_std[s][2]}', f'{tau_std[s][3]}'])
-            axy[iter, s].set_ylim(400, 1200)
-            axy[iter, s].set_yticks(np.arange(400, 1201, 100)) 
+            axy[iter, s].set_ylim(500, 1200)
+            axy[iter, s].set_yticks(np.arange(500, 1201, 100)) 
             axy[iter, s].grid(True, alpha=0.3)
         
 
@@ -253,9 +253,10 @@ class trials_master:
 
         figy.legend(handles=legend_elements, loc='upper right', fontsize=10) 
         figy.set_size_inches(25, 12) 
+        
         plt.tight_layout()
         plt.savefig(f"trial_lists/sub-{self.params['participant_nr']}/plots/kalman_results.png", dpi=300, bbox_inches='tight')
-        # plt.show()      
+        plt.show()      
 
 
     def generate_sessions(self):
@@ -826,8 +827,8 @@ class trials_master:
             trials_final['rule'] = rules_long
             trials_final['dpos'] = np.repeat([int(x) for x in dpos_seq_full], 8)
             trials_final['trial_type'] = dpos_seq_long_flat_full
-            trials_final['sigma_q_std'] = np.repeat([int(x) for x in si_q_arr], 8*self.params["n_trials"])
-            trials_final['sigma_q_dev'] = np.repeat([int(x) for x in si_q_dev_arr], 8*self.params["n_trials"])
+            trials_final['sigma_q_std'] = np.repeat([x for x in si_q_arr], 8*self.params["n_trials"])
+            trials_final['sigma_q_dev'] = np.repeat([x for x in si_q_dev_arr], 8*self.params["n_trials"])
             trials_final['sigma_r'] = [self.params["si_r"]]*self.params["n_trials"]*8*len(tau_std[s])
             trials_final['noise_v'] = obs_noise
             trials_final['noise_w_std_t_minus_one'] = np.concatenate([proc_noise[x][0] for x in range(len(tau_std[s]))])
