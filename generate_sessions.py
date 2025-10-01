@@ -38,7 +38,7 @@ class trials_master:
                 "taus": [16, 40, 160, 240], # taus in each session
                 "dpos": [[2,3,4],[4,5,6],[0]], # deviant positions per rule
                 "contexts": ['std', 'dev'], 
-                "stat_std": 100, # stationary standard deviation of the processes
+                "stat_std": 25, # stationary standard deviation of the processes
                 "si_r": 10, # observation noise
                 "duration_tones": 0.1, # stimulus duration
                 "isi": 0.65, # inter-stimulus interval
