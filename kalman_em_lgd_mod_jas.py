@@ -125,6 +125,7 @@ class KalmanEM:
             transition_covariance=Q_true,  # Ground truth (FIXED)
             observation_covariance=R_true,  # Ground truth (FIXED)
             initial_state_mean=np.array([b_init, 1.0]),  # Second component should be 1
+            # initial_state_mean=np.array([0, 1.0]),
             initial_state_covariance=np.array([[1.0, 0.0], [0.0, 0.01]]),  # Small variance on intercept
             n_dim_state=2,
             n_dim_obs=1  # 1D observations
