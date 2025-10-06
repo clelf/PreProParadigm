@@ -59,7 +59,7 @@ class effect_sizes:
         for mu_dev_guess in mu_dev_guess_list:
             
             # compute standard deviation of deviant on log scale using the delta rule (and the shared stationary std on linear scale)
-            log_std_dev = self.params['stationary_std_lin']/(mu_dev_guess*np.log(2))
+            log_std_dev = self.get_log_std(mu_dev_guess, self.params['stationary_std_lin'])
 
             # compute d on log scale and compare to desired d (leave a error tolerance of 0.005)
             d_now = self.get_d(np.log2(self.params['mu_standard']), np.log2(mu_dev_guess), log_std_standard, log_std_dev)
