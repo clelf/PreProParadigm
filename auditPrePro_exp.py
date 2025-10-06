@@ -461,6 +461,7 @@ for i in range(0, int(n_trials) + 1):
             if elapsed - onset > trial_duration and elapsed - onset <= (trial_duration + response_window):
                 
                 message_color = (0, 0, 1)
+                # here, keyoard clock could be reset to get .rt
                 response_keys = response_kb.getKeys(key_pos, waitRelease=False)
                 
                 if response_keys and not key_pressed: # record only first response --> change?

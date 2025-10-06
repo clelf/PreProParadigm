@@ -445,7 +445,9 @@ class trials_master:
 
                 # compute effect size SNR
                 # NOTE: this could be used as an input parameter to sample mus?
+                # talk to ALex about this again
                 d_eff = (math.log(mu_std_dev[1])-math.log(mu_std_dev[0]))/self.params["stat_std"]
+                print(d_eff)
             
             
             if self.params["t_tones"] == True:
