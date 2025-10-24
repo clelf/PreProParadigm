@@ -1,13 +1,15 @@
 import numpy as np
-import time
-import sys
-import os
 import scipy.stats as ss
 import pickle
 import matplotlib.pyplot as plt
 from tqdm import tqdm
 from matplotlib.ticker import MaxNLocator
-import random
+import matplotlib.gridspec as gridspec
+import matplotlib.colors as mcolors
+
+
+# TODO: implement empty rule (less probability? check in Jasmin's code)
+
 
 
 ##### UTILS
@@ -41,10 +43,13 @@ class AuditGenerativeModel:
     """
 
     def __init__(self, params):
-
+        
+        # Samples / sessions parameters
         self.N_samples = params["N_samples"]
         self.N_blocks = params["N_blocks"]
         self.N_tones = params["N_tones"]
+
+        # Dynamics parameters
         if "tones_values" in params.keys():
             self.tones_values = params["tones_values"]
         if "mu_tau" in params.keys():
@@ -57,9 +62,11 @@ class AuditGenerativeModel:
         if "si_r" in params.keys():    
             self.si_r = params["si_r"]
 
+        # Context parameters
         if "N_ctx" not in params.keys(): self.N_ctx = 2 # context refers to being a std / dvt
         else: self.N_ctx = params["N_ctx"]
 
+        # In case of 2 contexts (std and dvt), define stationary values for both processes
         if "si_d_coef" in params.keys() and "si_stat" in params.keys() and "mu_d" in params.keys():
             self.mu_d = params["mu_d"]
             si_d_ub = (4 - self.mu_d)/3
@@ -220,77 +227,103 @@ class AuditGenerativeModel:
     ):
         return np.random.choice(states_values, p=states_trans_matrix[current_state])
 
-    def sample_pi(self, N, mu_rho, si_rho):
+    def sample_pi(self, N, mu_rho, si_rho, fixed_id=None, fixed_p=None):
         """A transition matrix with a sticky diagonal, controlled by the concentration parameter rho.
         rho is comprised between 0 and 1 and is is sampled from a truncated normal distribution of 
         mean mu_rho and standard deviation si_rho
 
         Parameters
         ----------
+        N : int
+            Number of states (transition matrix thus has shape NxN).
         mu_rho : float
-            Mean parameter of the normal distribution to sample 
+            Mean parameter of the normal distribution to sample from
         si_rho : float
-            _description_
+            Std of the truncated-normal used to sample rho.
+        fixed_id : int, optional
+            If provided together with ``fixed_p``, set the diagonal element for this
+            state to ``fixed_p`` and renormalize the remaining off-diagonal entries.
+        fixed_p : float, optional
+            Fixed probability to assign to the diagonal element ``fixed_id``.
 
         Returns
         -------
-        np.array (N, N)
-            Transition matrix
+        np.ndarray
+            (N, N) Markov transition matrix with sticky diagonal.
         """
 
         if N>1:
             # Sample parameters
             rho = self._sample_TN_(0, 1, mu_rho, si_rho).item()
-            eps = [np.random.uniform() for n in range(N)]
 
+            # eps = [np.random.uniform() for n in range(N)]
+            # # Delta has a zero diagonal and the rest of the elements of a row (for a rule) are partitions from 1 using the corresponding eps[row] (parameter for that rule), controlling for the sum to be 1
+            # delta = np.array([[(0 if i == j else (eps[i] * (1 - eps[i]) ** j if (j < i and j < N - 2) else (eps[i] * (1 - eps[i]) ** (j - 1) if i < j < N - 1 else 1 - sum([eps[i] * (1 - eps[i]) ** k for k in range(N - 2)])))) for j in range(N)] for i in range(N)])
+            
             # Delta has a zero diagonal and the rest of the elements of a row (for a rule) are partitions from 1 using the corresponding eps[row] (parameter for that rule), controlling for the sum to be 1
-            delta = np.array([[(0 if i == j else (eps[i] * (1 - eps[i]) ** j if (j < i and j < N - 2) else (eps[i] * (1 - eps[i]) ** (j - 1) if i < j < N - 1 else 1 - sum([eps[i] * (1 - eps[i]) ** k for k in range(N - 2)])))) for j in range(N)] for i in range(N)])
+            # Create delta: zero diagonal, off-diagonal values partitioned by eps
+            delta = np.zeros((N, N))
+            for i in range(N):
+                off_diag = np.random.dirichlet(np.ones(N - 1))
+                idx = 0
+                for j in range(N):
+                    if i != j:
+                        delta[i, j] = off_diag[idx]
+                        idx += 1
+            # delta rows sum to 1, diagonal is zero
             
             # Transition matrix
             pi = rho * np.eye(N) + (1 - rho) * delta
+
+            if fixed_id is not None and fixed_p is not None:
+                # Fixed diagonal value for the specified context
+                pi[fixed_id, fixed_id] = fixed_p
+                for j in range(N):
+                    if j != fixed_id:
+                        # Recompute other values in the row to ensure sum to 1
+                        pi[fixed_id, j] = (1 - fixed_p) * delta[fixed_id, j] / sum([delta[fixed_id, k] for k in range(N) if k != fixed_id])
+
         else:
             # if N==1:
             pi = np.eye(N)
         return pi
 
-    def sample_contexts(self, N, N_ctx, mu_rho_ctx, si_rho_ctx, return_pi=False):
-        """Samples a 1D sequence of N events that can each be associated with a context out of of N_ctx values in range(N_ctx), and evolve
-        through a Markov-chain manner with a transition matrix of parameters mu_rho_ctx and si_rho_ctx.
+    def sample_events(self, N_evt, N_val, pi_evt):
+        """Sample a sequence of discrete events evolving under a Markov chain.
 
         Parameters
         ----------
-
+        N_evt : int
+            Number of events to generate.
+        N_val : int
+            Number of distinct discrete values (states) each event can take.
+        pi_evt : array-like, shape (N_val, N_val)
+            Row-stochastic transition matrix (rows sum to 1).
 
         Returns
         -------
-        list
-            List of contexts for each of the N events
+        np.ndarray
+            Integer array of length ``N_evt`` with values in ``range(N_val)``.
         """
 
-        # Sample contexts transition matrix is sampled initially from a parametric distribution
-        pi_ctx = self.sample_pi(N_ctx, mu_rho_ctx, si_rho_ctx)
-        # pi_rules_0   = np.array([[0.9, 0.05, 0.05], [0.05, 0.9, 0.05], [0.05, 0.05, 0.9]]) # A very sticky transition matrix
 
         # Sequence of N contexts
-        ctx = np.zeros(N, dtype=np.int64)
+        evt = np.zeros(N_evt, dtype=np.int64)
 
         # Initilize context (assign to 0, randomly, or from the distribution from which the transition probas also come from)
-        ctx[0] = 0 # TODO: decide if going for this?
+        evt[0] = 0 # TODO: decide if going for this?
         # rules[0] = np.random.choice(N_rules)
 
-        for s in range(1, N):
+        for s in range(1, N_evt):
             # Markov chain
-            ctx[s] = self.sample_next_markov_state(
-                current_state=ctx[s - 1],
-                states_values=range(N_ctx),
-                states_trans_matrix=pi_ctx,
+            evt[s] = self.sample_next_markov_state(
+                current_state=evt[s - 1],
+                states_values=range(N_val),
+                states_trans_matrix=pi_evt,
             )
 
-        if return_pi:
-            return ctx, pi_ctx
-        else:
-            return ctx
-        
+        return evt
+
     def sample_states_OBSOLETE(self, contexts, return_pars=False):
         """Generates a dictionary of data sequence for each context (std or dvt) dynamics given a sequence of contexts
 
@@ -335,7 +368,7 @@ class AuditGenerativeModel:
 
             for c in range(self.N_ctx):  # 2 contexts: std or dvt
                 # Parameter that is not necessarily tested
-                lim[c, b]       = self._sample_N_(lim_Cs[c], self.si_lim).item()
+                lim[c, b]       = self._sample_N_(lim_Cs[c], self.si_lim).item() # TODO: check effect of si_lim!!!
                 if self.params_testing:
                     # In that case, parameters have already been sampled, no need to sample more
                     tau[c, b] = self.mu_tau
@@ -393,22 +426,20 @@ class AuditGenerativeModel:
 
         Parameters
         ----------
-        contexts : integer np.array
-            2-dimensional sequence of contexts filled with 0 or 1 (std or dvt), of size (N_blocks, N_tones)
-        return_pars: bool
-            also returns the time constant and sationary value (previously: retention and drift) parameters for each state at each block
-
+        contexts : ndarray
+            2-D integer array of shape (N_blocks, N_tones) with values {0, 1} indicating
+            standard (0) or deviant (1) at each tone.
+        return_pars : bool, optional
+            If True, also return a tuple with sampled parameters ``(tau, lim, si_stat, si_q)``.
 
         Returns
         -------
         states : dict
-            dictionary encoding the hidden state values (one-dimensional np.array) for each
-            context c (keys).
-        pars (optional):
-            tau: time constant parameter for each context (only if return_pars set to True)
-            lim: stationary value parameter for each context
-       
-
+            Mapping from context id to a 2-D array of shape (N_blocks, N_tones) with the
+            hidden-state trajectory for that context.
+        pars : tuple, optional
+            When ``return_pars`` is True, returns ``(tau, lim, si_stat, si_q)`` where
+            ``si_q`` is the process noise computed from ``tau`` and ``si_stat``.
         """
 
         # Sample tau and si_stat for all of the run's blocks
@@ -514,9 +545,9 @@ class AuditGenerativeModel:
         """
 
         fig, ax1 = plt.subplots(figsize=figsize)
-        ax1.plot(x_stds, label="x_std", color="green", linestyle="dotted", linewidth=2)
-        ax1.plot(x_dvts, label="x_dvt", color="blue", linestyle="dotted", linewidth=2)
-        ax1.plot(ys, label="y", color="red", linestyle="dashed", linewidth=2)
+        ax1.plot(x_stds, label="x_std", color="blue", linestyle="-", linewidth=2)
+        ax1.plot(x_dvts, label="x_dvt", color="red", linestyle="-", linewidth=2)
+        ax1.plot(ys, label="y", color="green", linestyle="-", linewidth=2)
         ax1.set_ylabel("y")
 
         ax2 = ax1.twinx()
@@ -525,15 +556,15 @@ class AuditGenerativeModel:
         ax2.set_yticks(ticks=[0, 1], labels=["std", "dvt"])
 
         # Plot horizontal lines for lim_std and lim_dvt
-        ax1.hlines(pars[1][0], xmin=0, xmax=len(x_stds)-1, color="green", linestyle="-", alpha=0.5, label="lim_std")
-        ax1.hlines(pars[1][1], xmin=0, xmax=len(x_dvts)-1, color="blue", linestyle="-", alpha=0.5, label="lim_dvt")
+        ax1.hlines(pars[1][0], xmin=0, xmax=len(x_stds)-1, color="blue", linestyle="--", alpha=0.5, label="lim_std")
+        ax1.hlines(pars[1][1], xmin=0, xmax=len(x_dvts)-1, color="red", linestyle="--", alpha=0.5, label="lim_dvt")
 
         # Fill margin between lim ± si_stat for both processes
         ax1.fill_between(
             range(len(x_stds)),
             pars[1][0] - pars[2],
             pars[1][0] + pars[2],
-            color="green",
+            color="blue",
             alpha=0.2,
             label="lim_std ± si_stat"
         )
@@ -541,31 +572,31 @@ class AuditGenerativeModel:
             range(len(x_dvts)),
             pars[1][1] - pars[2],
             pars[1][1] + pars[2],
-            color="blue",
+            color="red",
             alpha=0.2,
             label="lim_dvt ± si_stat"
         )
 
-        fig.legend()
-
-        fig.tight_layout()
+        ax1.legend(bbox_to_anchor=(1.1, 1))
+        plt.tight_layout()
         plt.show()
 
     def generate_batch(self, N_samples=None, return_pars=False):
-        """Calls generate_run N_samples times and concatenates the return obsjects as (N_samples, *object_size) size objects
-        I.e. generates N_samples samples / single sequences
+        """Generate a batch of runs by repeatedly calling ``generate_run``.
 
         Parameters
         ----------
         N_samples : int, optional
-            number of samples in one batch; if None takes value defined upon init of instance, by default None
+            Number of runs to generate. If None, uses ``self.N_samples``.
         return_pars : bool, optional
-            to return the hidden states (individual std and dvt) dynamics parameters tau and lim for each block in each batch, by default False
+            If True, each generated sample will include the associated dynamics parameters of runs.
 
         Returns
         -------
-        objects as in generate_run
-            rules, rules_long, dpos, timbres, timbres_long, contexts, states, obs(, pars) (im the case of HGM) // contexts, states, obs(, pars) (in the case of N-HGM)
+        tuple
+            A tuple with objects produced by ``generate_run`` stacked along a new
+            leading axis (so arrays become shape (N_samples, ...)). Dictionaries
+            (e.g. ``states``) are preserved as mappings to stacked arrays.
         """
 
         # Store latent rules and timbres, states and observations from N_samples batches
@@ -637,10 +668,12 @@ class NonHierachicalAuditGM(AuditGenerativeModel):
         pars: optional
             Time constant and sationary value parameters for each state at each block
         """
+        # Sample transition matrix between contexts from a parametric distribution
+        pi_ctx = self.sample_pi(self.N_ctx, mu_rho=self.mu_rho_ctx, si_rho=self.si_rho_ctx)
 
         # Get std/dvt contexts
-        contexts = self.sample_contexts(
-            N=self.N_tones, N_ctx=self.N_ctx, mu_rho_ctx=self.mu_rho_ctx, si_rho_ctx=self.si_rho_ctx
+        contexts = self.sample_events(
+            N_evt=self.N_tones, N_val=self.N_ctx, pi_evt=pi_ctx
         )
         contexts = contexts.reshape((self.N_blocks, self.N_tones))
 
@@ -672,15 +705,52 @@ class HierarchicalAuditGM(AuditGenerativeModel):
         super().__init__(params)
 
         self.N_blocks = params["N_blocks"]
+
+        # Rules
         self.rules_dpos_set = params["rules_dpos_set"]
         self.N_rules = len(self.rules_dpos_set)
-        self.mu_rho_rules = params["mu_rho_rules"]
-        self.si_rho_rules = params["si_rho_rules"]
-        self.mu_rho_timbres = params["mu_rho_timbres"]
-        self.si_rho_timbres = params["si_rho_timbres"]
+        if "return_pi_rules" in params.keys():
+            self.return_pi_rules = params["return_pi_rules"]
+        else:
+            self.return_pi_rules = False
+
+        # Define transition matrix stochastically
+        if "mu_rho_rules" in params.keys():
+            self.mu_rho_rules = params["mu_rho_rules"]
+        if "si_rho_rules" in params.keys():
+            self.si_rho_rules = params["si_rho_rules"]
+
+        # Or set transition matrix manually
+        if "pi_rules" in params.keys():
+            self.pi_rules = params["pi_rules"]
+        else:
+            self.pi_rules = None
+
+        # Optionally, set one null rule
+        if "fixed_rule_id" in params.keys() and "fixed_rule_p" in params.keys():
+            self.fixed_rule_id = params["fixed_rule_id"]
+            self.fixed_rule_p = params["fixed_rule_p"]
+        else:
+            self.fixed_rule_id = None
+            self.fixed_rule_p = None
+
+        # Rules color map
+        if "rules_cmap" in params.keys():
+            self.rules_cmap = params["rules_cmap"]
+        else:
+            colors = {0: "tab:blue", 1: "tab:red", 2: "tab:orange"}
+            self.rules_cmap = {i: colors[i] for i in range(self.N_rules)}
+            pass
+
+
+        # Timbres
+        if "mu_rho_timbres" in params.keys():
+            self.mu_rho_timbres = params["mu_rho_timbres"]
+        if "si_rho_timbres" in params.keys():
+            self.si_rho_timbres = params["si_rho_timbres"]
 
     def sample_rules(
-        self, N_blocks, N_rules, mu_rho_rules, si_rho_rules, return_pi=False
+        self, N_blocks, N_rules, mu_rho_rules, si_rho_rules, fixed_rule_id=None, fixed_rule_p=None, return_pi=False
     ):
         """Sample rules for a run consisting in a sequence of blocks of tones (each sequence being associated with one rule).
         Rules evolve in a Markov chain manner.
@@ -701,8 +771,18 @@ class HierarchicalAuditGM(AuditGenerativeModel):
         np.array (N_blocks,)
             Sequence of rules associated with blocks for each block of N_blocks blocks
         """
+        if self.pi_rules is not None:
+            # Use manually specified pi
+            pi_rules = self.pi_rules
+        else:
+            # Sample pi
+            pi_rules = self.sample_pi(N_rules, mu_rho_rules, si_rho_rules, fixed_id=fixed_rule_id, fixed_p=fixed_rule_p)
 
-        return self.sample_contexts(N=N_blocks, N_ctx=N_rules, mu_rho_ctx=mu_rho_rules, si_rho_ctx=si_rho_rules, return_pi=return_pi)
+
+        if return_pi:
+            return self.sample_events(N_evt=N_blocks, N_val=N_rules, pi_evt=pi_rules), pi_rules
+        else:
+            return self.sample_events(N_evt=N_blocks, N_val=N_rules, pi_evt=pi_rules)
 
     def sample_timbres(self, rules_seq, N_timbres, mu_rho_timbres, si_rho_timbres):
         """Sample timbres, mediated by a Markov chain transition process too
@@ -759,22 +839,28 @@ class HierarchicalAuditGM(AuditGenerativeModel):
             List of deviant position indexes for each block of tones
         """
 
-        # Given the trial's rule stored in rules and the possible positions for deviant associated with it,
-        # sample the position where the deviant will be located in this trial
-        # return [np.random.choice(rules_dpos_set[rule]) for rule in rules]
-        return np.array(
-            [self.sample_uniform_choice(rules_dpos_set[rule]) for rule in rules]
-        )
+        # Handle None case: if rules_dpos_set[rule] is None, return None for that block
+        dpos = []
+        for rule in rules:
+            rule_set = rules_dpos_set[rule]
+            if rule_set is None:
+                dpos.append(None)
+            else:
+                dpos.append(self.sample_uniform_choice(rule_set))
+        return np.array(dpos, dtype=object)
 
     def get_contexts(self, dpos, N_blocks, N_tones):
         contexts = np.zeros((N_blocks, N_tones), dtype=np.int64)
         for i, pos in enumerate(dpos):
-            contexts[i, pos] = 1
+            # i is block index, pos is deviant position index within the block
+            if dpos[i] is not None:
+                contexts[i, pos] = 1
         return contexts
 
     def generate_run(
         self,
-        return_pars = False
+        return_pars = False,
+        return_pi_rules = False
     ):
         """Generate data for one run of experiment: rules, dvt positions, timbres, contexts (std or dvt),
         states (hidden states dynamics), observations
@@ -794,16 +880,19 @@ class HierarchicalAuditGM(AuditGenerativeModel):
         contexts:
             List of whether a tone is considered a dvt or a std --> contexts[t] = (current tone == dvt) (length = N_tones*N_blocks)
         states:
-            List ynamics of both std (states[0]) and dvt (states[1]) at each "time step" (length = N_tones*N_blocks)
+            List of the dynamics of both std (states[0]) and dvt (states[1]) at each "time step" (length = N_tones*N_blocks)
         obs:
             Observed tone at each time step (length = N_tones*N_blocks)
         pars: optional
-            Time constant and sationary value parameters for each state at each block
+            Time constant and stationary value parameters for each state at each block
         """
 
         # Sample sequence of rules ids
-        rules = self.sample_rules(self.N_blocks, self.N_rules, self.mu_rho_rules, self.si_rho_rules)
-        # Store latent rules in a per-tone array # This is equivalent to matlab's repmat
+        res = self.sample_rules(self.N_blocks, self.N_rules, self.mu_rho_rules, self.si_rho_rules, self.fixed_rule_id, self.fixed_rule_p, self.return_pi_rules)
+        if return_pi_rules:
+            rules, pi_rules = res
+        else:
+            rules = res
         rules_long = np.tile(rules[:, np.newaxis], (1, self.N_tones))
 
         # Sample timbres (here we consider that there are as many different timbres as there are different rules -- self.N_rules)
@@ -832,12 +921,15 @@ class HierarchicalAuditGM(AuditGenerativeModel):
         states = dict([(key, states[key].flatten()) for key in states.keys()])
         obs = obs.flatten()
 
-        if return_pars:
-            return rules, rules_long, dpos, timbres, timbres_long, contexts, states, obs, pars
-        else:
-            return rules, rules_long, dpos, timbres, timbres_long, contexts, states, obs
 
-    def plot_contexts_rules_states_obs(self, x_stds, x_dvts, ys, Cs, rules, dpos, pars):
+        return_elements = (rules, rules_long, dpos, timbres, timbres_long, contexts, states, obs)
+        if return_pars:
+            return_elements = (*return_elements, pars)
+        if self.return_pi_rules and return_pi_rules:
+            return_elements = (*return_elements, pi_rules)
+        return return_elements
+
+    def plot_contexts_rules_states_obs(self, x_stds, x_dvts, ys, Cs, rules, dpos, pars, text=True):
         """For the hierachical evolution of rules and contexts (NOTE: timbres not included in this viz atm)
 
         Parameters
@@ -854,87 +946,91 @@ class HierarchicalAuditGM(AuditGenerativeModel):
             _description_
         """
 
+        # TODO: sort legend positioning, and blank space around plot within rectangle
+
         # Visualize tone frequencies
         fig, ax1 = plt.subplots(figsize=(20, 6))
+        ax1.set_xlim(0, len(x_stds)-1)
+        ax1.set_ylim(min(np.min(x_stds), np.min(x_dvts), np.min(ys)) - 0.5, max(np.max(x_stds), np.max(x_dvts), np.max(ys)) + 0.5)
         ax1.plot(
             x_stds,
             label="x_std",
-            color="green",
-            marker="o",
+            color="blue",
+            marker="o" if text else None,
             markersize=4,
-            linestyle="dotted",
-            linewidth=2,
-            alpha=0.5,
+            linestyle="-",
+            linewidth=2 if text else 1,
+            alpha=0.9,
         )
         ax1.plot(
             x_dvts,
             label="x_dvt",
-            color="blue",
-            marker="o",
+            color="red",
+            marker="o" if text else None,
             markersize=4,
-            linestyle="dotted",
-            linewidth=2,
-            alpha=0.5,
+            linestyle="-",
+            linewidth=2 if text else 1,
+            alpha=0.9,
         )
         ax1.plot(
             ys,
             label="y",
-            color="k",
-            marker="o",
+            color="green",
+            marker="o" if text else None,
             markersize=4,
-            linestyle="dashed",
-            linewidth=2,
+            linewidth=2 if text else 1,
+            alpha=0.9
         )
-        ax1.set_ylabel("y")
+        ax1.set_ylabel("processes and observations")
 
-        ax2 = ax1.twinx()
-        ax2.plot(Cs, "o", color="black", label="context", markersize=2)
-        ax2.set_ylabel("context")
-        ax2.yaxis.set_major_locator(MaxNLocator(integer=True))
-        ax2.set_yticks(ticks=[0, 1], labels=["std", "dvt"])
+        if text:
+            ax2 = ax1.twinx()
+            ax2.plot(Cs, "o", color="black", label="context", markersize=2)
+            ax2.set_ylabel("context")
+            ax2.yaxis.set_major_locator(MaxNLocator(integer=True))
+            ax2.set_yticks(ticks=[0, 1], labels=["std", "dvt"])
 
-        rules_cmap = {0: "tab:blue", 1: "tab:red", 2: "tab:orange"}
         for i, rule in enumerate(rules):
-            plt.axvspan(
+            ax1.axvspan(
                 i * self.N_tones,
                 i * self.N_tones + self.N_tones,
-                facecolor=rules_cmap[rule],
+                facecolor=self.rules_cmap[rule],
                 alpha=0.25,
             )
 
         for i in range(self.N_blocks):
-            plt.axvline(i * self.N_tones, color="tab:gray", linewidth=0.9)
+            ax1.axvline(i * self.N_tones, color="tab:gray", linewidth=0.9)
 
-        # Add rule and deviant position texts above the plot
-        text_y_position = 1.15  # Position above the plot
-        for i in range(self.N_blocks):
-            ax2.text(
-            x=i * self.N_tones + 0.35 * self.N_tones,
-            y=text_y_position,
-            s=f"rule {rules[i]}",
-            color=rules_cmap[rules[i]],
-            transform=ax2.transData,
-            ha="center",
-            )
-            ax2.text(
-            x=i * self.N_tones + 0.35 * self.N_tones,
-            y=text_y_position - 0.075,
-            s=f"dvt {dpos[i]}",
-            color=rules_cmap[rules[i]],
-            transform=ax2.transData,
-            ha="center",
-            )
+        if text:
+            text_y_position = 1.15  # Position above the plot
+            for i in range(self.N_blocks):
+                ax2.text(
+                    x=i * self.N_tones + 0.35 * self.N_tones,
+                    y=text_y_position,
+                    s=f"rule {rules[i]}",
+                    color=self.rules_cmap[rules[i]],
+                    transform=ax2.transData,
+                    ha="center",
+                )
+                ax2.text(
+                    x=i * self.N_tones + 0.35 * self.N_tones,
+                    y=text_y_position - 0.075,
+                    s=f"dvt {dpos[i]}",
+                    color=self.rules_cmap[rules[i]],
+                    transform=ax2.transData,
+                    ha="center",
+                )
+        else:
+            ax1.set_xticks(np.arange(0, self.N_blocks * self.N_tones + 1, 50))
 
-        # Plot horizontal lines for lim_std and lim_dvt
-        ax1.hlines(pars[1][0], xmin=0, xmax=len(x_stds)-1, color="green", linestyle="-", alpha=0.5, label="lim_std")
-        ax1.hlines(pars[1][1], xmin=0, xmax=len(x_dvts)-1, color="blue", linestyle="-", alpha=0.5, label="lim_dvt")
+        ax1.hlines(pars[1][0], xmin=0, xmax=len(x_stds)-1, color="blue", linestyle="--", linewidth=2, alpha=0.5, label="lim_std")
+        ax1.hlines(pars[1][1], xmin=0, xmax=len(x_dvts)-1, color="red", linestyle="--", linewidth=2,alpha=0.5, label="lim_dvt")
 
-        # Fill margin between lim ± si_stat for both processes
         ax1.fill_between(
             range(len(x_stds)),
             pars[1][0] - pars[2],
             pars[1][0] + pars[2],
-            color="green",
+            color="blue",
             alpha=0.2,
             label="lim_std ± si_stat"
         )
@@ -942,29 +1038,115 @@ class HierarchicalAuditGM(AuditGenerativeModel):
             range(len(x_dvts)),
             pars[1][1] - pars[2],
             pars[1][1] + pars[2],
-            color="blue",
+            color="red",
             alpha=0.2,
             label="lim_dvt ± si_stat"
         )
 
-        # Adjust the title to be below the plot
         tau_str = f"std: {pars[0][0]:.2f}, dvt: {pars[0][1]:.2f}" if self.N_ctx == 2 else f"{pars[0]:.2f}"
         si_q_str = f"std: {pars[3][0]:.2f}, dvt: {pars[3][1]:.2f}" if self.N_ctx == 2 else f"{pars[3]:.2f}"
 
-        title_line1 = f"tau: {tau_str}; si_stat: {pars[2]:.2f}; si_q: {si_q_str}"
+        title_line1 = f"tau: {tau_str}  |  si_stat: {pars[2]:.2f}  |  si_q: {si_q_str}"
         title_line2 = f"(mu_tau: {self.mu_tau:.2f}, mu_si_stat: {self.si_stat:.2f}, mu_si_q: {self.si_stat * ((2 * self.mu_tau - 1) ** 0.5) / self.mu_tau:.2f}, si_r: {self.si_r:.2f})"
-        plt.title(f"{title_line1}\n{title_line2}", y=-0.2)
-        
-        fig.legend(bbox_to_anchor=(1.1, 1))
-        plt.tight_layout()
+        ax1.set_title(f"{title_line1}\n{title_line2}", y=-0.2)
+        ax1.legend(bbox_to_anchor=(1.1, 1))
+        plt.tight_layout(rect=[0, 0, 1, 1])
+        plt.subplots_adjust(left=0.05, right=0.98, top=0.95, bottom=0.08)
         plt.show()
 
-    def plot_rules_dpos(self, rules, dpos, pars):
+
+    def plot_combined_with_matrix(self, x_stds, x_dvts, ys, Cs, rules, dpos, pars, pi_rules=None, text=True):
+        """
+        Plots plot_contexts_rules_states_obs and plot_rules_dpos as subplots, and pi_rules as a matrix on the side.
+        """
+
+        fig = plt.figure(figsize=(24, 12))
+        gs = gridspec.GridSpec(2, 2, width_ratios=[4, 1], height_ratios=[1, 1])
+
+        # Top subplot: contexts, rules, states, obs
+        ax1 = fig.add_subplot(gs[0, 0])
+        ax1.set_xlim(0, len(x_stds)-1)
+        ax1.set_ylim(min(np.min(x_stds), np.min(x_dvts), np.min(ys)) - 0.5, max(np.max(x_stds), np.max(x_dvts), np.max(ys)) + 0.5)
+        ax1.plot(x_stds, label="x_std", color="blue", marker="o" if text else None, markersize=4, linestyle="-", linewidth=2 if text else 1, alpha=0.9)
+        ax1.plot(x_dvts, label="x_dvt", color="red", marker="o" if text else None, markersize=4, linestyle="-", linewidth=2 if text else 1, alpha=0.9)
+        ax1.plot(ys, label="y", color="green", marker="o" if text else None, markersize=4, linewidth=2 if text else 1, alpha=0.9)
+        ax1.set_ylabel("processes and observations")
+        if text:
+            ax2 = ax1.twinx()
+            ax2.plot(Cs, "o", color="black", label="context", markersize=2)
+            ax2.set_ylabel("context")
+            ax2.yaxis.set_major_locator(MaxNLocator(integer=True))
+            ax2.set_yticks(ticks=[0, 1], labels=["std", "dvt"])
+        for i, rule in enumerate(rules):
+            ax1.axvspan(i * self.N_tones, i * self.N_tones + self.N_tones, facecolor=self.rules_cmap[rule], alpha=0.25)
+        for i in range(self.N_blocks):
+            ax1.axvline(i * self.N_tones, color="tab:gray", linewidth=0.9)
+        if text:
+            text_y_position = 1.15
+            for i in range(self.N_blocks):
+                ax2.text(x=i * self.N_tones + 0.35 * self.N_tones, y=text_y_position, s=f"rule {rules[i]}", color=self.rules_cmap[rules[i]], transform=ax2.transData, ha="center")
+                ax2.text(x=i * self.N_tones + 0.35 * self.N_tones, y=text_y_position - 0.075, s=f"dvt {dpos[i]}", color=self.rules_cmap[rules[i]], transform=ax2.transData, ha="center")
+        else:
+            ax1.set_xticks(np.arange(0, self.N_blocks * self.N_tones + 1, 50))
+        ax1.hlines(pars[1][0], xmin=0, xmax=len(x_stds)-1, color="blue", linestyle="--", linewidth=2, alpha=0.5, label="lim_std")
+        ax1.hlines(pars[1][1], xmin=0, xmax=len(x_dvts)-1, color="red", linestyle="--", linewidth=2,alpha=0.5, label="lim_dvt")
+        ax1.fill_between(range(len(x_stds)), pars[1][0] - pars[2], pars[1][0] + pars[2], color="blue", alpha=0.2, label="lim_std ± si_stat")
+        ax1.fill_between(range(len(x_dvts)), pars[1][1] - pars[2], pars[1][1] + pars[2], color="red", alpha=0.2, label="lim_dvt ± si_stat")
+        tau_str = f"std: {pars[0][0]:.2f}, dvt: {pars[0][1]:.2f}" if self.N_ctx == 2 else f"{pars[0]:.2f}"
+        si_q_str = f"std: {pars[3][0]:.2f}, dvt: {pars[3][1]:.2f}" if self.N_ctx == 2 else f"{pars[3]:.2f}"
+        title_line1 = f"tau: {tau_str}  |  si_stat: {pars[2]:.2f}  |  si_q: {si_q_str}"
+        title_line2 = f"(mu_tau: {self.mu_tau:.2f}, mu_si_stat: {self.si_stat:.2f}, mu_si_q: {self.si_stat * ((2 * self.mu_tau - 1) ** 0.5) / self.mu_tau:.2f}, si_r: {self.si_r:.2f})"
+        ax1.set_title(f"{title_line1}\n{title_line2}", y=-0.2)
+        ax1.legend(bbox_to_anchor=(1.1, 1))
+
+        # Bottom subplot: rules/dpos
+        ax3 = fig.add_subplot(gs[1, 0])
+        for i, y in enumerate(dpos):
+            ax3.vlines(x=i, ymin=0, ymax=y, color="tab:gray", linewidth=0.9, zorder=1, alpha=0.5)
+        ax3.scatter(range(len(dpos)), dpos, c=[self.rules_cmap[rule] for rule in rules], zorder=2)
+        ax3.set_ylabel("dvt pos")
+        ax3.set_xlabel("trial")
+        ax3.set_xlim(0, len(dpos)-1)
+        ax3.set_ylim(1, 8)
+        ax3.yaxis.set_major_locator(MaxNLocator(integer=True))
+        ax3.set_xticks(range(len(dpos)))
+        handles = [plt.Line2D([0], [0], marker="o", color="w", markerfacecolor=color, markersize=10) for color in self.rules_cmap.values()]
+        labels = self.rules_cmap.keys()
+        ax3.legend(handles, labels, title="rule")
+        if not text:
+            ax3.set_xticks(np.arange(0, self.N_blocks + 1, 50))
+        tau_str = f"std: {pars[0][0]:.2f}, dvt: {pars[0][1]:.2f}" if self.N_ctx == 2 else f"{pars[0]:.2f}"
+        si_q_str = f"std: {pars[3][0]:.2f}, dvt: {pars[3][1]:.2f}" if self.N_ctx == 2 else f"{pars[3]:.2f}"
+        title_line1 = f"tau: {tau_str}; si_stat: {pars[2]:.2f}; si_q: {si_q_str}"
+        title_line2 = f"(mu_tau: {self.mu_tau:.2f}, mu_si_stat: {self.si_stat:.2f}, mu_si_q: {self.si_stat * ((2 * self.mu_tau - 1) ** 0.5) / self.mu_tau:.2f}, si_r: {self.si_r:.2f})"
+        ax3.set_title(f"{title_line1}\n{title_line2}", y=-0.2)
+
+        # Right subplot: transition matrix pi_rules
+        if pi_rules is not None:
+            ax4 = fig.add_subplot(gs[:, 1])
+            im = ax4.imshow(pi_rules, cmap="Blues", vmin=0, vmax=1)
+            ax4.set_title("Transition Matrix (pi_rules)")
+            ax4.set_xlabel("To rule")
+            ax4.set_ylabel("From rule")
+            ax4.set_xticks(np.arange(pi_rules.shape[1]))
+            ax4.set_yticks(np.arange(pi_rules.shape[0]))
+            # Add colorbar
+            cbar = fig.colorbar(im, ax=ax4, fraction=0.046, pad=0.04)
+            # Annotate matrix values
+            for i in range(pi_rules.shape[0]):
+                for j in range(pi_rules.shape[1]):
+                    ax4.text(j, i, f"{pi_rules[i, j]:.2f}", ha="center", va="center", color="black")
+
+        plt.tight_layout(rect=[0, 0, 1, 1])
+        plt.subplots_adjust(left=0.05, right=0.98, top=0.95, bottom=0.08, wspace=0.25, hspace=0.25)
+        plt.show()
+
+    def plot_rules_dpos(self, rules, dpos, pars, text=True):
+
+        # TODO: sort blank space around plot within rectangle
+
 
         # Visualize hierarchical information: dvt pos and rule
-
-        rules_cmap = {0: "tab:blue", 1: "tab:red", 2: "tab:orange"}
-
         fig, ax = plt.subplots(figsize=(20, 6))
         for i, y in enumerate(dpos):
             ax.vlines(
@@ -977,7 +1159,7 @@ class HierarchicalAuditGM(AuditGenerativeModel):
                 alpha=0.5,
             )
         ax.scatter(
-            range(len(dpos)), dpos, c=[rules_cmap[rule] for rule in rules], zorder=2
+            range(len(dpos)), dpos, c=[self.rules_cmap[rule] for rule in rules], zorder=2
         )
         ax.set_ylabel("dvt pos")
         ax.set_xlabel("trial")
@@ -989,10 +1171,14 @@ class HierarchicalAuditGM(AuditGenerativeModel):
             plt.Line2D(
                 [0], [0], marker="o", color="w", markerfacecolor=color, markersize=10
             )
-            for color in rules_cmap.values()
+            for color in self.rules_cmap.values()
         ]
-        labels = rules_cmap.keys()
+        labels = self.rules_cmap.keys()
         ax.legend(handles, labels, title="rule")
+
+        if not text:
+            # Set x ticks every 50 tones if too many tones
+            ax.set_xticks(np.arange(0, self.N_blocks + 1, 50))
 
         tau_str = f"std: {pars[0][0]:.2f}, dvt: {pars[0][1]:.2f}" if self.N_ctx == 2 else f"{pars[0]:.2f}"
         si_q_str = f"std: {pars[3][0]:.2f}, dvt: {pars[3][1]:.2f}" if self.N_ctx == 2 else f"{pars[3]:.2f}"
@@ -1007,14 +1193,24 @@ class HierarchicalAuditGM(AuditGenerativeModel):
 def example_HGM(config_H):
     gm = HierarchicalAuditGM(config_H)
 
-    rules, rules_long, dpos, timbres, timbres_long, contexts, states, obs, pars = gm.generate_run(return_pars=True)
-    # rules_, rules_long_, dpos_, timbres_, timbres_long_, contexts_, states_, obs_ = gm.generate_batch(N_samples=2) # calls generate_run N_samples times and concatenates the return obsjects as (N_samples, object_size) size objects
+    if "return_pi_rules" in config_H.keys() and config_H["return_pi_rules"]:
+        rules, _, dpos, _, _, contexts, states, obs, pars, pi_rules = gm.generate_run(return_pars=True, return_pi_rules=config_H["return_pi_rules"])
+    else:
+        rules, _, dpos, _, _, contexts, states, obs, pars = gm.generate_run(return_pars=True)
+        pi_rules = None
 
     # States, current blocks' rules, contexts based on rules and sampled deviant positions, and observations sampled from states based on context
-    gm.plot_contexts_rules_states_obs(states[0], states[1], obs, contexts, rules, dpos, pars)
+    if config_H["N_blocks"] <= 20:
+        text=True
+    else:
+        text=False
+    
+    # gm.plot_contexts_rules_states_obs(states[0], states[1], obs, contexts, rules, dpos, pars, text=text)
 
     # Deviant position for each rule
-    gm.plot_rules_dpos(rules, dpos, pars)
+    # gm.plot_rules_dpos(rules, dpos, pars, text=text)
+
+    gm.plot_combined_with_matrix(states[0], states[1], obs, contexts, rules, dpos, pars, pi_rules=pi_rules, text=text)
 
     # An example of the states and observation sampling for one block
     gm.plot_contexts_states_obs(contexts[0:gm.N_tones], obs[0:gm.N_tones], states[0][0:gm.N_tones], states[1][0:gm.N_tones], gm.N_tones, pars=pars)
@@ -1060,13 +1256,13 @@ if __name__ == "__main__":
     # Example hierachical GM (rules, timbres [not implemented], std/dvt)
     config_H = {
         "N_samples": 1,
-        "N_blocks": 20,
+        "N_blocks": 120, # TODO: adapt here!
         "N_tones": 8,
         # "rules_dpos_set": np.array([[3, 4, 5], [4, 5, 6], [5, 6, 7]]),
         "rules_dpos_set": np.array([[3, 4, 5], [5, 6, 7]]),
         "mu_tau": 4,
         "si_tau": 1,
-        "si_lim": 5,
+        "si_lim": 0.2,
         "mu_rho_rules": 0.9,
         "si_rho_rules": 0.05,
         "mu_rho_timbres": 0.8,
@@ -1075,9 +1271,19 @@ if __name__ == "__main__":
         "si_stat": 0.5,  # stationary process variance
         "si_r": 0.2,  # measurement noise variance
         "si_d_coef": 0.05,
-        "mu_d": 2
+        "mu_d": 2,
+        "return_pi_rules": True
     }
-    example_HGM(config_H)
+    # example_HGM(config_H)
+
+
+    config_H_nullrule = config_H.copy()
+    config_H_nullrule["mu_tau"] = 160
+    config_H_nullrule["rules_dpos_set"] = [[3, 4, 5], [5, 6, 7], None]
+    config_H_nullrule["fixed_rule_id"] = 2
+    config_H_nullrule["fixed_rule_p"] = 0.1
+    config_H_nullrule["rules_cmap"] = {0: "tab:blue", 1: "tab:red", 2: "tab:gray"}
+    example_HGM(config_H_nullrule)
     
     # Example non-hierachical GM (no rules, std/dvt)
     config_NH = {
