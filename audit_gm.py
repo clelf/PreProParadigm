@@ -49,6 +49,17 @@ class AuditGenerativeModel:
         self.N_blocks = params["N_blocks"]
         self.N_tones = params["N_tones"]
 
+        # specify pi manually according to what I did before
+        self.fix_pi = params["fix_pi"]
+        self.fix_pi_vals = params["fix_pi_vals"]
+
+        # fix taus std/dev, lim, and d
+        self.fix_process = params["fix_process"]
+
+        self.fix_lim_val = params["fix_lim_val"]
+        self.fix_tau_val = params["fix_tau_val"]
+        self.fix_d_val = params["fix_d_val"]
+
         # Dynamics parameters
         if "tones_values" in params.keys():
             self.tones_values = params["tones_values"]
@@ -251,41 +262,51 @@ class AuditGenerativeModel:
         np.ndarray
             (N, N) Markov transition matrix with sticky diagonal.
         """
+        if self.fix_pi == False:
 
-        if N>1:
-            # Sample parameters
-            rho = self._sample_TN_(0, 1, mu_rho, si_rho).item()
+            if N>1:
+                # Sample parameters
+                rho = self._sample_TN_(0, 1, mu_rho, si_rho).item()
 
-            # eps = [np.random.uniform() for n in range(N)]
-            # # Delta has a zero diagonal and the rest of the elements of a row (for a rule) are partitions from 1 using the corresponding eps[row] (parameter for that rule), controlling for the sum to be 1
-            # delta = np.array([[(0 if i == j else (eps[i] * (1 - eps[i]) ** j if (j < i and j < N - 2) else (eps[i] * (1 - eps[i]) ** (j - 1) if i < j < N - 1 else 1 - sum([eps[i] * (1 - eps[i]) ** k for k in range(N - 2)])))) for j in range(N)] for i in range(N)])
-            
-            # Delta has a zero diagonal and the rest of the elements of a row (for a rule) are partitions from 1 using the corresponding eps[row] (parameter for that rule), controlling for the sum to be 1
-            # Create delta: zero diagonal, off-diagonal values partitioned by eps
-            delta = np.zeros((N, N))
-            for i in range(N):
-                off_diag = np.random.dirichlet(np.ones(N - 1))
-                idx = 0
-                for j in range(N):
-                    if i != j:
-                        delta[i, j] = off_diag[idx]
-                        idx += 1
-            # delta rows sum to 1, diagonal is zero
-            
-            # Transition matrix
-            pi = rho * np.eye(N) + (1 - rho) * delta
+                # eps = [np.random.uniform() for n in range(N)]
+                # # Delta has a zero diagonal and the rest of the elements of a row (for a rule) are partitions from 1 using the corresponding eps[row] (parameter for that rule), controlling for the sum to be 1
+                # delta = np.array([[(0 if i == j else (eps[i] * (1 - eps[i]) ** j if (j < i and j < N - 2) else (eps[i] * (1 - eps[i]) ** (j - 1) if i < j < N - 1 else 1 - sum([eps[i] * (1 - eps[i]) ** k for k in range(N - 2)])))) for j in range(N)] for i in range(N)])
+                
+                # Delta has a zero diagonal and the rest of the elements of a row (for a rule) are partitions from 1 using the corresponding eps[row] (parameter for that rule), controlling for the sum to be 1
+                # Create delta: zero diagonal, off-diagonal values partitioned by eps
+                delta = np.zeros((N, N))
+                for i in range(N):
+                    off_diag = np.random.dirichlet(np.ones(N - 1))
+                    idx = 0
+                    for j in range(N):
+                        if i != j:
+                            delta[i, j] = off_diag[idx]
+                            idx += 1
+                # delta rows sum to 1, diagonal is zero
+                
+                # Transition matrix
+                pi = rho * np.eye(N) + (1 - rho) * delta
 
-            if fixed_id is not None and fixed_p is not None:
-                # Fixed diagonal value for the specified context
-                pi[fixed_id, fixed_id] = fixed_p
-                for j in range(N):
-                    if j != fixed_id:
-                        # Recompute other values in the row to ensure sum to 1
-                        pi[fixed_id, j] = (1 - fixed_p) * delta[fixed_id, j] / sum([delta[fixed_id, k] for k in range(N) if k != fixed_id])
+                if fixed_id is not None and fixed_p is not None:
+                    # Fixed diagonal value for the specified context
+                    pi[fixed_id, fixed_id] = fixed_p
+                    for j in range(N):
+                        if j != fixed_id:
+                            # Recompute other values in the row to ensure sum to 1
+                            pi[fixed_id, j] = (1 - fixed_p) * delta[fixed_id, j] / sum([delta[fixed_id, k] for k in range(N) if k != fixed_id])
 
-        else:
-            # if N==1:
-            pi = np.eye(N)
+            else:
+                # if N==1:
+                pi = np.eye(N)
+
+        elif self.fix_pi == True:
+
+            pi = np.array([
+            [self.fix_pi_vals[0], 1 - self.fix_pi_vals[0] - self.fix_pi_vals[1], self.fix_pi_vals[1]],
+            [1 - self.fix_pi_vals[0] - self.fix_pi_vals[1], self.fix_pi_vals[0], self.fix_pi_vals[1]],
+            [(1 - self.fix_pi_vals[2])/2, (1 - self.fix_pi_vals[2])/2, self.fix_pi_vals[2]]
+            ])        
+        
         return pi
 
     def sample_events(self, N_evt, N_val, pi_evt):
@@ -368,7 +389,7 @@ class AuditGenerativeModel:
 
             for c in range(self.N_ctx):  # 2 contexts: std or dvt
                 # Parameter that is not necessarily tested
-                lim[c, b]       = self._sample_N_(lim_Cs[c], self.si_lim).item() # TODO: check effect of si_lim!!!
+                lim[c, b] = self._sample_N_(lim_Cs[c], self.si_lim).item() # TODO: check effect of si_lim!!!
                 if self.params_testing:
                     # In that case, parameters have already been sampled, no need to sample more
                     tau[c, b] = self.mu_tau
@@ -443,13 +464,19 @@ class AuditGenerativeModel:
         """
 
         # Sample tau and si_stat for all of the run's blocks
-        if self.params_testing:
-            tau = np.array([self.mu_tau]) # for compatibility with later, since when self.params_testing, N_ctx can only be 1
+
+        if not self.fix_process:
+            if self.params_testing:
+                tau = np.array([self.mu_tau]) # for compatibility with later, since when self.params_testing, N_ctx can only be 1
+                si_stat = self.si_stat
+            else:
+                # NOTE: for mu_tau=64, si_tau=0.5 the distributions covers well the range of values from 1 to 256
+                tau = self._sample_logN_(min=1, mu=self.mu_tau, si=self.si_tau, size=self.N_ctx) # size = (N_ctx,) # TODO: should ensure tau_dev = (1/N_tones)*tau_std and tau_dev >= 1
+                si_stat = self._sample_logN_(min=0, mu=self.si_stat, si=0.2).item() # std and dvt share the same stationary variance
+
+        elif self.fix_process:
+            tau = np.array(self.fix_tau_val)
             si_stat = self.si_stat
-        else:
-            # NOTE: for mu_tau=64, si_tau=0.5 the distributions covers well the range of values from 1 to 256
-            tau = self._sample_logN_(min=1, mu=self.mu_tau, si=self.si_tau, size=self.N_ctx) # size = (N_ctx,) # TODO: should ensure tau_dev = (1/N_tones)*tau_std and tau_dev >= 1
-            si_stat = self._sample_logN_(min=0, mu=self.si_stat, si=0.2).item() # std and dvt share the same stationary variance
 
         # Compute si_q (for both processes)
         si_q = si_stat * ((2 * tau - 1) ** 0.5) / tau
@@ -465,11 +492,19 @@ class AuditGenerativeModel:
             lim[0] = self._sample_N_(0, 1).item()
 
         # Sample d
-        if self.N_ctx == 2:
+        if self.N_ctx == 2 and not self.fix_process:
             d = self._sample_biN_(self.mu_d, self.si_d).item()
             lim[0] = self._sample_N_(0.5, 0.5).item()
+            lim[0] = -0.6
+            d = 2
             if np.sign(lim[0]) == np.sign(d): lim[0] *= -1
-            lim[1] = lim[0] + d * si_stat
+            lim[1] = lim[0] + d * si_stat # NOTE JASMIN: observation noise lacking in calculation of d
+
+        elif self.N_ctx == 2 and self.fix_process:
+            d = self.fix_d_val
+            lim[0] = self.fix_lim_val
+            #if np.sign(lim[0]) == np.sign(d): lim[0] *= -1
+            lim[1] = lim[0] + d * si_stat # NOTE JASMIN: observation noise lacking in calculation of d   
         
         # Initialize states
         states = dict([(int(c), np.zeros(contexts.shape)) for c in range(self.N_ctx)])
@@ -547,7 +582,7 @@ class AuditGenerativeModel:
         fig, ax1 = plt.subplots(figsize=figsize)
         ax1.plot(x_stds, label="x_std", color="blue", linestyle="-", linewidth=2)
         ax1.plot(x_dvts, label="x_dvt", color="red", linestyle="-", linewidth=2)
-        ax1.plot(ys, label="y", color="green", linestyle="-", linewidth=2)
+        #ax1.plot(ys, label="y", color="green", linestyle="-", linewidth=2)
         ax1.set_ylabel("y")
 
         ax2 = ax1.twinx()
@@ -713,6 +748,8 @@ class HierarchicalAuditGM(AuditGenerativeModel):
             self.return_pi_rules = params["return_pi_rules"]
         else:
             self.return_pi_rules = False
+
+        # sampling    
 
         # Define transition matrix stochastically
         if "mu_rho_rules" in params.keys():
@@ -1069,7 +1106,7 @@ class HierarchicalAuditGM(AuditGenerativeModel):
         ax1.set_ylim(min(np.min(x_stds), np.min(x_dvts), np.min(ys)) - 0.5, max(np.max(x_stds), np.max(x_dvts), np.max(ys)) + 0.5)
         ax1.plot(x_stds, label="x_std", color="blue", marker="o" if text else None, markersize=4, linestyle="-", linewidth=2 if text else 1, alpha=0.9)
         ax1.plot(x_dvts, label="x_dvt", color="red", marker="o" if text else None, markersize=4, linestyle="-", linewidth=2 if text else 1, alpha=0.9)
-        ax1.plot(ys, label="y", color="green", marker="o" if text else None, markersize=4, linewidth=2 if text else 1, alpha=0.9)
+        #ax1.plot(ys, label="y", color="green", marker="o" if text else None, markersize=4, linewidth=2 if text else 1, alpha=0.9)
         ax1.set_ylabel("processes and observations")
         if text:
             ax2 = ax1.twinx()
