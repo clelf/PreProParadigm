@@ -8,9 +8,6 @@ import matplotlib.gridspec as gridspec
 import matplotlib.colors as mcolors
 
 
-# TODO: implement empty rule (less probability? check in Jasmin's code)
-
-
 
 ##### UTILS
 
@@ -50,16 +47,21 @@ class AuditGenerativeModel:
         self.N_tones = params["N_tones"]
 
         # specify pi manually according to what I did before
-        self.fix_pi = params["fix_pi"]
-        self.fix_pi_vals = params["fix_pi_vals"]
+        if "fix_pi" in params.keys():
+            self.fix_pi = params["fix_pi"]
+        if "fix_pi_vals" in params.keys():
+            self.fix_pi_vals = params["fix_pi_vals"]
 
         # fix taus std/dev, lim, and d
-        self.fix_process = params["fix_process"]
-
-        self.fix_lim_val = params["fix_lim_val"]
-        self.fix_tau_val = params["fix_tau_val"]
-        self.fix_d_val = params["fix_d_val"]
-
+        if "fix_process" in params.keys():
+            self.fix_process = params["fix_process"]
+            if "fix_lim_val" in params.keys() and "fix_tau_val" in params.keys() and "fix_d_val" in params.keys():
+                self.fix_lim_val = params["fix_lim_val"]
+                self.fix_tau_val = params["fix_tau_val"]
+                self.fix_d_val   = params["fix_d_val"]
+        else:
+            self.fix_process = False
+        
         # Dynamics parameters
         if "tones_values" in params.keys():
             self.tones_values = params["tones_values"]
@@ -67,7 +69,7 @@ class AuditGenerativeModel:
             self.mu_tau = params["mu_tau"]  # Std and dvt process
         self.si_tau = params["si_tau"]  # Std and dvt process
         self.si_lim = params["si_lim"]  # Std and dvt process
-        # self.si_q = params["si_q"] # Obsolete TODO: replace by below si_stat and later define si_q_dev and si_q_std
+        # self.si_q = params["si_q"] # Obsolete
         if "si_stat" in params.keys():
             self.si_stat = params["si_stat"]
         if "si_r" in params.keys():    
@@ -78,10 +80,11 @@ class AuditGenerativeModel:
         else: self.N_ctx = params["N_ctx"]
 
         # In case of 2 contexts (std and dvt), define stationary values for both processes
-        if "si_d_coef" in params.keys() and "si_stat" in params.keys() and "mu_d" in params.keys():
+        if "si_d_coef" in params.keys() and "si_stat" in params.keys() and "mu_d" in params.keys() and "d_bounds" in params.keys():
             self.mu_d = params["mu_d"]
-            si_d_ub = (4 - self.mu_d)/3
-            si_d_lb = (self.mu_d - 0.1)/3
+            si_d_ub = (params["d_bounds"]["high"] - self.mu_d)/3     # we want most of d (i.e. 3*si_d) to be <= 4
+            si_d_lb = (self.mu_d - params["d_bounds"]["low"])/3   # we want most of d (i.e. 3*si_d) to be >= 0.1
+            # NOTE si_d_coef controls how close to its bounds the value of si_d is (bounds defined by us above)
             self.si_d = si_d_lb + params["si_d_coef"] * (si_d_ub - si_d_lb)
 
         # NOTE: this only happens in contexts where N_ctx is also == 1
@@ -109,11 +112,12 @@ class AuditGenerativeModel:
                     high=np.log10(self.si_r_bounds["high"]),
                     size=self.N_samples
                 )
-            if "si_d" in params.keys() and params["si_d"] and "mu_d" in params.keys():
-                self.mu_d = params["mu_d"]
-                si_d_ub = (4 - self.mu_d)/3
-                si_d_lb = (self.mu_d - 0.1)/3
-                self.si_d_set = np.random.uniform(si_d_lb, si_d_ub, self.N_samples)
+            # COMMMENTED OUT AS NOT TESTING D NOW
+            # if "si_d" in params.keys() and params["si_d"] and "mu_d" in params.keys():
+            #     self.mu_d = params["mu_d"]
+            #     si_d_ub = (4 - self.mu_d)/3
+            #     si_d_lb = (self.mu_d - 0.1)/3
+            #     self.si_d_set = np.random.uniform(si_d_lb, si_d_ub, self.N_samples)
             
         else:
             self.params_testing = False
@@ -238,6 +242,18 @@ class AuditGenerativeModel:
     ):
         return np.random.choice(states_values, p=states_trans_matrix[current_state])
 
+    def compute_fixed_pi(self, fixed_pi_vals):
+        """Compute a fixed transition matrix with given diagonal values, for 3 states.
+        """
+        pi = np.array([
+            [fixed_pi_vals[0], 1 - fixed_pi_vals[0] - fixed_pi_vals[1], fixed_pi_vals[1]],
+            [1 - fixed_pi_vals[0] - fixed_pi_vals[1], fixed_pi_vals[0], fixed_pi_vals[1]],
+            [(1 - fixed_pi_vals[2])/2, (1 - fixed_pi_vals[2])/2, fixed_pi_vals[2]]
+            ])        
+        
+        return pi
+
+
     def sample_pi(self, N, mu_rho, si_rho, fixed_id=None, fixed_p=None):
         """A transition matrix with a sticky diagonal, controlled by the concentration parameter rho.
         rho is comprised between 0 and 1 and is is sampled from a truncated normal distribution of 
@@ -262,50 +278,41 @@ class AuditGenerativeModel:
         np.ndarray
             (N, N) Markov transition matrix with sticky diagonal.
         """
-        if self.fix_pi == False:
 
-            if N>1:
-                # Sample parameters
-                rho = self._sample_TN_(0, 1, mu_rho, si_rho).item()
+        if N>1:
+            # Sample parameters
+            rho = self._sample_TN_(0, 1, mu_rho, si_rho).item()
 
-                # eps = [np.random.uniform() for n in range(N)]
-                # # Delta has a zero diagonal and the rest of the elements of a row (for a rule) are partitions from 1 using the corresponding eps[row] (parameter for that rule), controlling for the sum to be 1
-                # delta = np.array([[(0 if i == j else (eps[i] * (1 - eps[i]) ** j if (j < i and j < N - 2) else (eps[i] * (1 - eps[i]) ** (j - 1) if i < j < N - 1 else 1 - sum([eps[i] * (1 - eps[i]) ** k for k in range(N - 2)])))) for j in range(N)] for i in range(N)])
-                
-                # Delta has a zero diagonal and the rest of the elements of a row (for a rule) are partitions from 1 using the corresponding eps[row] (parameter for that rule), controlling for the sum to be 1
-                # Create delta: zero diagonal, off-diagonal values partitioned by eps
-                delta = np.zeros((N, N))
-                for i in range(N):
-                    off_diag = np.random.dirichlet(np.ones(N - 1))
-                    idx = 0
-                    for j in range(N):
-                        if i != j:
-                            delta[i, j] = off_diag[idx]
-                            idx += 1
-                # delta rows sum to 1, diagonal is zero
-                
-                # Transition matrix
-                pi = rho * np.eye(N) + (1 - rho) * delta
+            # eps = [np.random.uniform() for n in range(N)]
+            # # Delta has a zero diagonal and the rest of the elements of a row (for a rule) are partitions from 1 using the corresponding eps[row] (parameter for that rule), controlling for the sum to be 1
+            # delta = np.array([[(0 if i == j else (eps[i] * (1 - eps[i]) ** j if (j < i and j < N - 2) else (eps[i] * (1 - eps[i]) ** (j - 1) if i < j < N - 1 else 1 - sum([eps[i] * (1 - eps[i]) ** k for k in range(N - 2)])))) for j in range(N)] for i in range(N)])
+            
+            # Delta has a zero diagonal and the rest of the elements of a row (for a rule) are partitions from 1 using the corresponding eps[row] (parameter for that rule), controlling for the sum to be 1
+            # Create delta: zero diagonal, off-diagonal values partitioned by eps
+            delta = np.zeros((N, N))
+            for i in range(N):
+                off_diag = np.random.dirichlet(np.ones(N - 1))
+                idx = 0
+                for j in range(N):
+                    if i != j:
+                        delta[i, j] = off_diag[idx]
+                        idx += 1
+            # delta rows sum to 1, diagonal is zero
+            
+            # Transition matrix
+            pi = rho * np.eye(N) + (1 - rho) * delta
 
-                if fixed_id is not None and fixed_p is not None:
-                    # Fixed diagonal value for the specified context
-                    pi[fixed_id, fixed_id] = fixed_p
-                    for j in range(N):
-                        if j != fixed_id:
-                            # Recompute other values in the row to ensure sum to 1
-                            pi[fixed_id, j] = (1 - fixed_p) * delta[fixed_id, j] / sum([delta[fixed_id, k] for k in range(N) if k != fixed_id])
+            if fixed_id is not None and fixed_p is not None:
+                # Fixed diagonal value for the specified context
+                pi[fixed_id, fixed_id] = fixed_p
+                for j in range(N):
+                    if j != fixed_id:
+                        # Recompute other values in the row to ensure sum to 1
+                        pi[fixed_id, j] = (1 - fixed_p) * delta[fixed_id, j] / sum([delta[fixed_id, k] for k in range(N) if k != fixed_id])
 
-            else:
-                # if N==1:
-                pi = np.eye(N)
-
-        elif self.fix_pi == True:
-
-            pi = np.array([
-            [self.fix_pi_vals[0], 1 - self.fix_pi_vals[0] - self.fix_pi_vals[1], self.fix_pi_vals[1]],
-            [1 - self.fix_pi_vals[0] - self.fix_pi_vals[1], self.fix_pi_vals[0], self.fix_pi_vals[1]],
-            [(1 - self.fix_pi_vals[2])/2, (1 - self.fix_pi_vals[2])/2, self.fix_pi_vals[2]]
-            ])        
+        else:
+            # if N==1:
+            pi = np.eye(N)
         
         return pi
 
@@ -492,19 +499,21 @@ class AuditGenerativeModel:
             lim[0] = self._sample_N_(0, 1).item()
 
         # Sample d
-        if self.N_ctx == 2 and not self.fix_process:
-            d = self._sample_biN_(self.mu_d, self.si_d).item()
-            lim[0] = self._sample_N_(0.5, 0.5).item()
-            lim[0] = -0.6
-            d = 2
-            if np.sign(lim[0]) == np.sign(d): lim[0] *= -1
-            lim[1] = lim[0] + d * si_stat # NOTE JASMIN: observation noise lacking in calculation of d
+        if self.N_ctx == 2:
+            si_eff = np.sqrt(si_stat**2 + self.si_r**2) # effective standard deviation considering both process and observation noise
+            if not self.fix_process:
+                d = self._sample_biN_(self.mu_d, self.si_d).item()
+                lim[0] = self._sample_N_(0.5, 0.5).item()
+                # lim[0] = -0.6
+                # d = 2
+                if np.sign(lim[0]) == np.sign(d): lim[0] *= -1 # this ensures the sampled lim[0] and d have opposite signs so lim[1] is on the other side of lim[0]
+                lim[1] = lim[0] + d * si_eff # NOTE JASMIN: observation noise lacking in calculation of d
 
-        elif self.N_ctx == 2 and self.fix_process:
-            d = self.fix_d_val
-            lim[0] = self.fix_lim_val
-            #if np.sign(lim[0]) == np.sign(d): lim[0] *= -1
-            lim[1] = lim[0] + d * si_stat # NOTE JASMIN: observation noise lacking in calculation of d   
+            else:
+                d = self.fix_d_val
+                lim[0] = self.fix_lim_val
+                #if np.sign(lim[0]) == np.sign(d): lim[0] *= -1
+                lim[1] = lim[0] + d * si_eff # NOTE JASMIN: observation noise lacking in calculation of d   
         
         # Initialize states
         states = dict([(int(c), np.zeros(contexts.shape)) for c in range(self.N_ctx)])
@@ -653,8 +662,9 @@ class AuditGenerativeModel:
                     self.si_stat = self.si_stat_set[samp]
                 if self.si_r_set is not None:
                     self.si_r = self.si_r_set[samp]
-                if self.si_d:
-                    self.si_d = self.si_d_set[samp]
+                # COMMMENTED OUT AS NOT TESTING D NOW
+                # if self.si_d_set is not None:
+                #     self.si_d = self.si_d_set[samp]
             res = self.generate_run(return_pars=return_pars)
             batch.append([*res])
 
@@ -713,11 +723,11 @@ class NonHierachicalAuditGM(AuditGenerativeModel):
         contexts = contexts.reshape((self.N_blocks, self.N_tones))
 
         # Sample states and observations
+        res = self.sample_states(contexts, return_pars)
         if return_pars:
-            states, pars = self.sample_states(contexts, return_pars)
+            states, pars = res[0], res[1]
         else:
-            states = self.sample_states(contexts, return_pars)
-
+            states = res
         obs = self.sample_observations(contexts, states)
 
         # Flatten rules_long, contexts, (states, ) timbres and obs
@@ -727,7 +737,7 @@ class NonHierachicalAuditGM(AuditGenerativeModel):
 
         if return_pars:
             # Append self.si_r to the pars element of res (res[-1])
-            pars = tuple((*pars, self.si_r))
+            pars = (*pars, self.si_r)
             return contexts, states, obs, pars
         else:
             return contexts, states, obs
@@ -808,11 +818,11 @@ class HierarchicalAuditGM(AuditGenerativeModel):
         np.array (N_blocks,)
             Sequence of rules associated with blocks for each block of N_blocks blocks
         """
-        if self.pi_rules is not None:
-            # Use manually specified pi
-            pi_rules = self.pi_rules
+        if self.fix_pi and self.fix_pi_vals is not None:
+            # If a pi_rules has been manually specified, use it
+            pi_rules = self.compute_fixed_pi(self.fix_pi_vals)
         else:
-            # Sample pi
+            # Sample pi stochastically 
             pi_rules = self.sample_pi(N_rules, mu_rho_rules, si_rho_rules, fixed_id=fixed_rule_id, fixed_p=fixed_rule_p)
 
 
@@ -923,6 +933,8 @@ class HierarchicalAuditGM(AuditGenerativeModel):
         pars: optional
             Time constant and stationary value parameters for each state at each block
         """
+        if return_pi_rules is None:
+            return_pi_rules = self.return_pi_rules
 
         # Sample sequence of rules ids
         res = self.sample_rules(self.N_blocks, self.N_rules, self.mu_rho_rules, self.si_rho_rules, self.fixed_rule_id, self.fixed_rule_p, self.return_pi_rules)
@@ -944,7 +956,6 @@ class HierarchicalAuditGM(AuditGenerativeModel):
         contexts = self.get_contexts(dpos, self.N_blocks, self.N_tones)
 
         # Sample states and observations
-        # Sample states and observations
         if return_pars:
             states, pars = self.sample_states(contexts, return_pars)
         else:
@@ -962,7 +973,7 @@ class HierarchicalAuditGM(AuditGenerativeModel):
         return_elements = (rules, rules_long, dpos, timbres, timbres_long, contexts, states, obs)
         if return_pars:
             return_elements = (*return_elements, pars)
-        if self.return_pi_rules and return_pi_rules:
+        if return_pi_rules:
             return_elements = (*return_elements, pi_rules)
         return return_elements
 
@@ -1308,9 +1319,10 @@ if __name__ == "__main__":
         "si_stat": 0.5,  # stationary process variance
         "si_r": 0.2,  # measurement noise variance
         "si_d_coef": 0.05,
+        "d_bounds": {"high": 4, "low": 0.1},
         "mu_d": 2,
         "return_pi_rules": True,
-         "fix_process": False, # fix tau, lim, d
+        "fix_process": False, # fix tau, lim, d
         "fix_tau_val": [16,2],
         "fix_lim_val": -0.6,
         "fix_d_val": 2,
@@ -1342,6 +1354,7 @@ if __name__ == "__main__":
         "si_stat": 0.2,  # stationary process variance
         "si_r": 0.2,  # measurement noise
         "si_d_coef": 0.05,
+        "d_bounds": {"high": 4, "low": 0.1},
         "mu_d": 2
     }
     example_NHGM(config_NH)
