@@ -18,12 +18,9 @@ GENERAL
 - a = 1-(1/tau), d = mu/tau
 - stat_std = (sigma_q*tau)/sqrt(2*tau-1)
     --> sigma_q = (stat_std*sqrt(2*tau-1))/tau
-- d_eff = (log(mu_std)-log(mu_dev))/stat_std
-- TODO: use d_eff to generate mus?
-
 '''
 
-class trials_master:
+class trials_master_new:
     '''data generation process for auditPrePro task'''
 
     def __init__(self):
@@ -32,22 +29,84 @@ class trials_master:
                 "n_sessions": 6,
                 "n_trials": 60, # number of trials per run
                 "rules": [0, 1, 2],
-                "diag": 0.8, # self-trinsition of rules 1 and 2
+                "diag": 0.8, # self-transition of rules 1 and 2
                 "tr_3": 0.1, # transition rules to trials w/o deviant
-                "tr_3_3": 0, # transition pprobability trials w/o deviant
-                "frequencies": [[1000, 1050], [700, 750]], # mu values for std and dev process
+                "tr_3_3": 0, # transition probability trials w/o deviant
+                "frequencies": [[-0.6, None], [0.3, None]], # mu values for standard 
                 "taus": [16, 40, 160, 240], # taus in each session
                 "dpos": [[2,3,4],[4,5,6],[0]], # deviant positions per rule
                 "contexts": ['std', 'dev'], 
-                "stat_std": 25, # stationary standard deviation of the processes
-                "si_r": 10, # observation noise
+                "stat_std": 0.05, # stationary standard deviation of the processes
+                "si_r": 0.02, # observation noise
+                "d_eff": 2, # effect size
                 "duration_tones": 0.1, # stimulus duration
                 "isi": 0.65, # inter-stimulus interval
                 "t_tones": True, # use tones as time steps 
                 "dev_t_tones": False, # do not use tones as time steps for deviant
                 "dev_process": True, # use a process for the deviants
-                "n_kalman": [8, 16, 24, 32, 40, 48, 56] # time steps to use for Kalman filter
+                "n_kalman": [8, 16, 24, 32, 40, 48, 56], # time steps to use for Kalman filter
             }
+        
+    def get_mu_dev(self):
+
+        for f in range(0,len(self.params["frequencies"])):
+
+            # compute effective variance as stationary variance + observation variance
+            var_eff = self.params["stat_std"]**2 + self.params["si_r"]**2
+            sigma_eff = np.sqrt(var_eff)
+            # compute deviant mean based on effect size
+            mu_dev_comp = (self.params["d_eff"]*sigma_eff) + self.params["frequencies"][f][0]
+
+            self.params["frequencies"][f][1] = mu_dev_comp
+            print(self.params["frequencies"])
+
+    def frequency_transfer(self, x_input, x_min=-1, x_max=1, f_exp_min=500, f_exp_max=1300, method = 'erb'):
+        
+        # implementation of different transfer functions from input space to frequency space
+        # agreed with Alex to use ERB scale for the main experiment
+
+        if method == 'mel':
+            m_min = 2595 * np.log10(1 + f_exp_min / 700)
+            m_max = 2595 * np.log10(1 + f_exp_max / 700)
+            
+            m = m_min + (m_max - m_min) * (x_input - (x_min)) / (x_max - (x_min))
+            freq_out =  700 * (10 ** (m / 2595) - 1)
+
+        elif method == 'bark':
+            b_min = 7 * np.arcsinh(f_exp_min / 600)
+            b_max = 7 * np.arcsinh(f_exp_max / 600)
+
+            b = b_min + (b_max - b_min) * (x_input - x_min) / (x_max - x_min)
+
+            freq_out = 600 * np.sinh(b / 7)
+
+
+        elif method == 'erb':
+            e_min = 21.4 * np.log10(4.37 * f_exp_min / 1000 + 1)
+            e_max = 21.4 * np.log10(4.37 * f_exp_max / 1000 + 1)
+
+            e = e_min + (e_max - e_min) * (x_input - (x_min)) / (x_max - (x_min))
+
+            e_std1 = e_min + (e_max - e_min) * (self.params["frequencies"][0][0] - (x_min)) / (x_max - (x_min))
+            e_dev1 = e_min + (e_max - e_min) * (self.params["frequencies"][0][1] - (x_min)) / (x_max - (x_min))
+            e_std2 = e_min + (e_max - e_min) * (self.params["frequencies"][1][0] - (x_min)) / (x_max - (x_min))
+            e_dev2 = e_min + (e_max - e_min) * (self.params["frequencies"][1][1] - (x_min)) / (x_max - (x_min))
+
+            print(e_std1, e_dev1, e_std2, e_dev2)
+
+            freq_out = (10 ** (e / 21.4) - 1) * (1000 / 4.37)
+
+            print((10 ** (e_std1 / 21.4) - 1) * (1000 / 4.37))
+            print((10 ** (e_dev1 / 21.4) - 1) * (1000 / 4.37))
+            print((10 ** (e_std2 / 21.4) - 1) * (1000 / 4.37))
+            print((10 ** (e_dev2 / 21.4) - 1) * (1000 / 4.37))
+       
+        elif method == 'log':
+            k = np.log(f_exp_max / f_exp_min) / (x_max - x_min)
+            freq_out = f_exp_min * np.exp(k * (x_input - x_min))
+
+        return freq_out
+
 
     def sample_next_markov_state(self, current_state, states_values, states_trans_matrix):
             '''Clems function to sample the next Markov state from current state, state values and transition matrix'''
@@ -229,8 +288,8 @@ class trials_master:
             axy[iter, s].scatter(range(0,4), [val[0] for val in mu_tones[s]], alpha=0.4, s=30, color='blue', facecolors='blue')
             axy[iter, s].set_xticks(range(4)) 
             axy[iter, s].set_xticklabels([f'{tau_std[s][0]}', f'{tau_std[s][1]}', f'{tau_std[s][2]}', f'{tau_std[s][3]}'])
-            axy[iter, s].set_ylim(500, 1200)
-            axy[iter, s].set_yticks(np.arange(500, 1201, 100)) 
+            axy[iter, s].set_ylim(-2, 2)
+            axy[iter, s].set_yticks(np.arange(-2, 1, 10)) 
             axy[iter, s].grid(True, alpha=0.3)
         
 
@@ -263,8 +322,10 @@ class trials_master:
 
     def generate_sessions(self):
         '''script for generating the trial sequence'''
-
+        
         self.prep_dirs()
+
+        self.get_mu_dev()
 
         mu_tones, tau_std, tau_dev = self.get_task_structure()  
 
@@ -442,12 +503,6 @@ class trials_master:
                         proc_noise[i][c] = np.repeat(proc_noise[i][c],8)
                         for t in range(1, int(self.params["n_trials"])): 
                             states[i][c][t] = states[i][c][t - 1] + 1 / tau_dev[s][i] * (mu_std_dev[c] - states[i][c][t - 1]) + w[t - 1]
-
-                # compute effect size SNR
-                # NOTE: this could be used as an input parameter to sample mus?
-                # talk to ALex about this again
-                d_eff = (math.log(mu_std_dev[1])-math.log(mu_std_dev[0]))/self.params["stat_std"]
-                print(d_eff)
             
             
             if self.params["t_tones"] == True:
@@ -622,13 +677,43 @@ class trials_master:
 
             obs = obs + v
 
+            frequency_mel = []
+            frequency_erb = []
+            frequency_log = []
+            frequency_bark = []
+
+            for observation in obs:
+                hz_val_mel = self.frequency_transfer(observation, method = 'mel')
+                hz_val_erb = self.frequency_transfer(observation, method = 'erb')
+                hz_val_log = self.frequency_transfer(observation, method = 'log')
+                hz_val_bark = self.frequency_transfer(observation, method = 'bark')
+                frequency_mel.append(hz_val_mel)
+                frequency_erb.append(hz_val_erb)
+                frequency_log.append(hz_val_log)
+                frequency_bark.append(hz_val_bark)
+
             obs_noise = v
 
+            ###------------ scatterplot observations against frequecy
+            plt.figure(figsize=(12, 6))
+            plt.scatter(obs, frequency_mel, alpha=0.5, color='blue', label='mel scale')
+            plt.scatter(obs, frequency_erb, alpha=0.5, color='green', label='erb scale')
+            plt.scatter(obs, frequency_log, alpha=0.5, color='orange', label='log scale')
+            plt.scatter(obs, frequency_bark, alpha=0.5, color='red', label='bark scale')
+            plt.xlabel('observation value')
+            plt.ylabel('frequency (Hz)')
+            plt.title(f'Frequency Transformation of Observations (Session {session_nr})')
+            plt.legend()
+            plt.grid(True, alpha=0.3)
+            plt.tight_layout()
+            plt.savefig(f"trial_lists/sub-{self.params['participant_nr']}/plots/frequency_transformation_session_{session_nr}.png", dpi=300, bbox_inches='tight')
+            plt.close()
             ###------------ plot observations
 
+            frequency_erb_array = np.array(frequency_erb)
             fig, ax = plt.subplots(figsize=(20, 5))
-            ax.plot(obs, label='sound observation', color='blue')
-            plt.scatter(indices_dev, obs[indices_dev], color='red', label='deviant')
+            ax.plot(frequency_erb_array, label='sound observation', color='blue')
+            plt.scatter(indices_dev, frequency_erb_array[indices_dev], color='red', label='deviant')
 
 
             for l in range(len(rules_long)):
@@ -660,7 +745,7 @@ class trials_master:
             ]
 
             ax.set_xlabel('tone')
-            ax.set_ylabel('observation value')
+            ax.set_ylabel('observation in Hz (erb scale)')
             ax.set_title(f"Sound Observations (Session {session_nr})")
             ax.legend()
             handles, labels = ax.get_legend_handles_labels()
@@ -814,8 +899,12 @@ class trials_master:
 
             ###------------ add all variables relevant to the logfiles and save conditions file
 
-            trials_final = pd.DataFrame(columns=['observation', 'state_std', 'state_dev','lim_std','lim_dev','tau_std','tau_dev','rule','dpos','trial_type','sigma_q_std','sigma_q_dev','sigma_r','noise_v','noise_w_std_t_minus_one','noise_w_dev_t_minus_one','ITI','duration_tones','ISI','trial_n','run_n','session_n'])
+            trials_final = pd.DataFrame(columns=['observation', 'frequency_mel', 'frequency_bark', 'frequency_erb','frequency_log', 'state_std', 'state_dev','lim_std','lim_dev','tau_std','tau_dev','rule','dpos','trial_type','sigma_q_std','sigma_q_dev','sigma_r','noise_v','noise_w_std_t_minus_one','noise_w_dev_t_minus_one','ITI','duration_tones','ISI','trial_n','run_n','session_n'])
             trials_final['observation'] = obs
+            trials_final['frequency_mel'] = frequency_mel
+            trials_final['frequency_bark'] = frequency_bark
+            trials_final['frequency_erb'] = frequency_erb
+            trials_final['frequency_log'] = frequency_log
             trials_final['state_std'] = std
             trials_final['state_dev'] = dev
             trials_final['lim_std'] = lim_std_log
@@ -853,14 +942,14 @@ class trials_master:
 
             # apply for each session
             self.apply_kalman(s, obs, dpos_seq_long_flat_full, si_q_arr, mu_tones, tau_std, figy, axy, n_iter = 10, tau_inits = 3.0)
-            
-        # plot across session
+
+        # plot individual sessions
         self.plot_kalman(figy, axy)
 
 
 if __name__ == "__main__":
     
-    task = trials_master()
+    task = trials_master_new() 
 
     print("=== Generating Trials ===")
     task.generate_sessions()
