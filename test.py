@@ -3,7 +3,7 @@ import numpy as np
 
 config_H = {
     "N_samples": 1,
-    "N_blocks": 160,
+    "N_blocks": 60,
     "N_tones": 8,
     "rules_dpos_set": np.array([[3, 4, 5], [5, 6, 7]]),
     "mu_tau": 16,
