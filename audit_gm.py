@@ -1309,7 +1309,13 @@ if __name__ == "__main__":
         "si_r": 0.2,  # measurement noise variance
         "si_d_coef": 0.05,
         "mu_d": 2,
-        "return_pi_rules": True
+        "return_pi_rules": True,
+         "fix_process": False, # fix tau, lim, d
+        "fix_tau_val": [16,2],
+        "fix_lim_val": -0.6,
+        "fix_d_val": 2,
+        "fix_pi": False,
+        "fix_pi_vals": [0.8, 0.1, 0]
     }
     # example_HGM(config_H)
 
