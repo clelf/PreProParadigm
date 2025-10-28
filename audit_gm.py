@@ -336,21 +336,20 @@ class AuditGenerativeModel:
 
 
         # Sequence of N contexts
-        evt = np.zeros(N_evt, dtype=np.int64)
+        evts = np.zeros(N_evt, dtype=np.int64)
 
         # Initilize context (assign to 0, randomly, or from the distribution from which the transition probas also come from)
-        evt[0] = 0 # TODO: decide if going for this?
-        # rules[0] = np.random.choice(N_rules)
+        evts[0] = np.random.choice(N_evt)
 
         for s in range(1, N_evt):
             # Markov chain
-            evt[s] = self.sample_next_markov_state(
-                current_state=evt[s - 1],
+            evts[s] = self.sample_next_markov_state(
+                current_state=evts[s - 1],
                 states_values=range(N_val),
                 states_trans_matrix=pi_evt,
             )
 
-        return evt
+        return evts
 
     def sample_states_OBSOLETE(self, contexts, return_pars=False):
         """Generates a dictionary of data sequence for each context (std or dvt) dynamics given a sequence of contexts
@@ -500,20 +499,21 @@ class AuditGenerativeModel:
 
         # Sample d
         if self.N_ctx == 2:
-            si_eff = np.sqrt(si_stat**2 + self.si_r**2) # effective standard deviation considering both process and observation noise
+            # effective standard deviation considering both process and observation noise
+            si_eff = np.sqrt(si_stat**2 + self.si_r**2)
             if not self.fix_process:
                 d = self._sample_biN_(self.mu_d, self.si_d).item()
                 lim[0] = self._sample_N_(0.5, 0.5).item()
                 # lim[0] = -0.6
                 # d = 2
                 if np.sign(lim[0]) == np.sign(d): lim[0] *= -1 # this ensures the sampled lim[0] and d have opposite signs so lim[1] is on the other side of lim[0]
-                lim[1] = lim[0] + d * si_eff # NOTE JASMIN: observation noise lacking in calculation of d
+                lim[1] = lim[0] + d * si_eff 
 
             else:
                 d = self.fix_d_val
                 lim[0] = self.fix_lim_val
                 #if np.sign(lim[0]) == np.sign(d): lim[0] *= -1
-                lim[1] = lim[0] + d * si_eff # NOTE JASMIN: observation noise lacking in calculation of d   
+                lim[1] = lim[0] + d * si_eff  
         
         # Initialize states
         states = dict([(int(c), np.zeros(contexts.shape)) for c in range(self.N_ctx)])
@@ -722,12 +722,13 @@ class NonHierachicalAuditGM(AuditGenerativeModel):
         )
         contexts = contexts.reshape((self.N_blocks, self.N_tones))
 
-        # Sample states and observations
-        res = self.sample_states(contexts, return_pars)
+        # Sample states
         if return_pars:
-            states, pars = res[0], res[1]
+            states, pars = self.sample_states(contexts, return_pars)
         else:
-            states = res
+            states = self.sample_states(contexts, return_pars)
+        
+        # Sample observations
         obs = self.sample_observations(contexts, states)
 
         # Flatten rules_long, contexts, (states, ) timbres and obs
@@ -955,11 +956,13 @@ class HierarchicalAuditGM(AuditGenerativeModel):
         # Get contexts
         contexts = self.get_contexts(dpos, self.N_blocks, self.N_tones)
 
-        # Sample states and observations
+        # Sample states
         if return_pars:
             states, pars = self.sample_states(contexts, return_pars)
         else:
             states = self.sample_states(contexts, return_pars)
+        
+        # Sample observations
         obs = self.sample_observations(contexts, states)
 
         # Flatten rules_long, contexts, (states, ) timbres and obs
@@ -969,12 +972,18 @@ class HierarchicalAuditGM(AuditGenerativeModel):
         states = dict([(key, states[key].flatten()) for key in states.keys()])
         obs = obs.flatten()
 
-
         return_elements = (rules, rules_long, dpos, timbres, timbres_long, contexts, states, obs)
+        
+        # Return parameters
         if return_pars:
+            # Append self.si_r to the pars element of res (res[-1])
+            pars = (*pars, self.si_r)            
             return_elements = (*return_elements, pars)
+        
+        # Return transition rules
         if return_pi_rules:
             return_elements = (*return_elements, pi_rules)
+        
         return return_elements
 
     def plot_contexts_rules_states_obs(self, x_stds, x_dvts, ys, Cs, rules, dpos, pars, text=True):
