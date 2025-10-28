@@ -6,5 +6,5 @@ Clémentine's part:
 
 Jasmin's part:
 
-- Data sequence generation (generate_sessions.py)
+- Data sequence generation (generate_test_sequences.py)
 - Experiment (auditPrePro_exp.py)
