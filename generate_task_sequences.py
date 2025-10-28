@@ -22,11 +22,11 @@ class trials_master:
 
         self.config_H = {
 
-            "participant_nr": 'test',
+            "participant_nr": 'testy',
             "N_samples": 1,
             "N_blocks": 60,
             "N_tones": 8,
-            "rules_dpos_set": np.array([[2, 3, 4], [4, 5, 6]]),
+            "rules_dpos_set": [[2, 3, 4], [4, 5, 6], None],
             "mu_tau": 16,
             "si_tau": 1,
             "si_lim": 0.2,
@@ -40,6 +40,9 @@ class trials_master:
             "si_d_coef": 0.05,
             "mu_d": 2,
             "return_pi_rules": True,
+            "fixed_rule_id": 2,
+            "fixed_rule_p": 0.1,
+            "rules_cmap": {0: "tab:blue", 1: "tab:red", 2: "tab:gray"},
             "fix_process": True, # fix tau, lim, d to input values
             "fix_tau_val": [16, 2],
             "fix_lim_val": -0.6,
@@ -51,13 +54,6 @@ class trials_master:
             "isi": 0.65, # inter-stimulus interval
             "duration_tones": 0.1, # stimulus duration
         }
-
-        self.config_H_nullrule = self.config_H.copy()
-        self.config_H_nullrule["mu_tau"] = 16
-        self.config_H_nullrule["rules_dpos_set"] = [[2, 3, 4], [4, 5, 6], None]
-        self.config_H_nullrule["fixed_rule_id"] = 2
-        self.config_H_nullrule["fixed_rule_p"] = 0.1
-        self.config_H_nullrule["rules_cmap"] = {0: "tab:blue", 1: "tab:red", 2: "tab:gray"}
 
     def prep_dirs(self):
         '''create output directories'''
@@ -431,8 +427,6 @@ class trials_master:
         #plt.show()
         plt.close()
 
-
-
     def generate_sessions(self):
 
         self.prep_dirs()
@@ -458,49 +452,15 @@ class trials_master:
             for r in range(0, self.config_H["n_runs"]):
 
                 # change configuration dict
-                self.config_H = {
-                    "participant_nr": 'test',
-                    "N_samples": 1,
-                    "N_blocks": 60,
-                    "N_tones": 8,
-                    "rules_dpos_set": np.array([[2, 3, 4], [4, 5, 6]]),
-                    "mu_tau": 16,
-                    "si_tau": 1,
-                    "si_lim": 0.2,
-                    "mu_rho_rules": 0.8,
-                    "si_rho_rules": 0.05,
-                    "mu_rho_timbres": 0.8,
-                    "si_rho_timbres": 0.05,
-                    # "si_q": 2,  # process noise variance
-                    "si_stat": 0.05,  # stationary process variance
-                    "si_r": 0.02,  # measurement noise variance
-                    "si_d_coef": 0.05,
-                    "mu_d": 2,
-                    "return_pi_rules": True,
-                    "fix_process": True, # fix tau, lim, d to input values
-                    "fix_tau_val": [tau_std[s][r], tau_std[s][r]/8],
-                    "fix_lim_val": mu_tones[s][r][0],
-                    "fix_d_val": 2,
-                    "fix_pi": True,
-                    "fix_pi_vals": [0.8, 0.1, 0],
-                    "n_sessions": 6,
-                    "n_runs": 4,
-                    "isi": 0.65, # inter-stimulus interval
-                    "duration_tones": 0.1, # stimulus duration
-                }
 
-                self.config_H_nullrule = self.config_H.copy()
-                self.config_H_nullrule["mu_tau"] = 16
-                self.config_H_nullrule["rules_dpos_set"] = [[2, 3, 4], [4, 5, 6], None]
-                self.config_H_nullrule["fixed_rule_id"] = 2
-                self.config_H_nullrule["fixed_rule_p"] = 0.1
-                self.config_H_nullrule["rules_cmap"] = {0: "tab:blue", 1: "tab:red", 2: "tab:gray"}
+                self.config_H["fix_tau_val"] = [tau_std[s][r], tau_std[s][r]/8]
+                self.config_H["fix_lim_val"] = mu_tones[s][r][0]
 
                 unbalanced = True
 
                 while unbalanced:
                     
-                    rules, _, dpos, _, _, contexts, states, obs, pars, pi_rules = gm.example_HGM(self.config_H_nullrule)
+                    rules, _, dpos, _, _, contexts, states, obs, pars, pi_rules = gm.example_HGM(self.config_H)
 
                     # check if rules are balanced
                     p_r1 = sum(rules == 0)/len(rules)
