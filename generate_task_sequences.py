@@ -1,3 +1,4 @@
+# ---- imports ---- #
 import audit_gm as gm
 
 import numpy as np
@@ -16,47 +17,49 @@ import os
 
 import time
 
+# ---- define class ----#
+
 class trials_master:
 
     def __init__(self):
 
         self.config_H = {
 
-            "participant_nr": 'testy',
+            "participant_nr": 'testy', # participant nr, as also read in by PsychPy exp.
             "N_samples": 1,
-            "N_blocks": 60,
-            "N_tones": 8,
-            "rules_dpos_set": [[2, 3, 4], [4, 5, 6], None],
-            "mu_tau": 16,
-            "si_tau": 1,
-            "si_lim": 0.2,
-            "mu_rho_rules": 0.8,
-            "si_rho_rules": 0.05,
-            "mu_rho_timbres": 0.8,
-            "si_rho_timbres": 0.05,
+            "N_blocks": 60, # number of trials
+            "N_tones": 8, # number of tones in each trial
+            "rules_dpos_set": [[2, 3, 4], [4, 5, 6], None], # deviant positions per rule
+            "mu_tau": 16, # unused for experiment
+            "si_tau": 1, # unused for experiment
+            "si_lim": 0.2, # unused for experiment
+            "mu_rho_rules": 0.8, # unused for experiment
+            "si_rho_rules": 0.05, # unused for experiment
+            "mu_rho_timbres": 0.8, # unused for experiment
+            "si_rho_timbres": 0.05, # unused for experiment
             # "si_q": 2,  # process noise variance
             "si_stat": 0.05,  # stationary process variance
             "si_r": 0.02,  # measurement noise variance
-            "si_d_coef": 0.05,
-            "mu_d": 2,
+            "si_d_coef": 0.05, # unused for experiment
+            "mu_d": 2, # unused for experiment
             "return_pi_rules": True,
             "fixed_rule_id": 2,
             "fixed_rule_p": 0.1,
             "rules_cmap": {0: "tab:blue", 1: "tab:red", 2: "tab:gray"},
             "fix_process": True, # fix tau, lim, d to input values
-            "fix_tau_val": [16, 2],
-            "fix_lim_val": -0.6,
-            "fix_d_val": 2,
+            "fix_tau_val": [16, 2], # tau std, tau dev
+            "fix_lim_val": -0.6, # lim std
+            "fix_d_val": 2, # effect size d
             "fix_pi": True,
-            "fix_pi_vals": [0.8, 0.1, 0],
-            "n_sessions": 6,
-            "n_runs": 4,
+            "fix_pi_vals": [0.8, 0.1, 0], # fixed values to create transition matrix
+            "n_sessions": 6, # number of sessions
+            "n_runs": 4, # number of runs per session
             "isi": 0.65, # inter-stimulus interval
             "duration_tones": 0.1, # stimulus duration
         }
 
     def prep_dirs(self):
-        '''create output directories'''
+        '''create necessary output directories'''
 
         os.makedirs('trial_lists/', exist_ok=True)
 
@@ -128,6 +131,7 @@ class trials_master:
         return mu_tones_all, taus_all, tau_std, tau_dev
     
     def plot_probabilities(self, rules, dpos, num, type):
+        '''plot the occurrences of rules and deviant positions per rule'''
 
         p_1 = sum(rules == 0)/len(rules)
         p_2 = sum(rules == 1)/len(rules)
@@ -249,7 +253,7 @@ class trials_master:
         
 
     def plot_kalman(self, figy, axy, n_kalman = [8, 16, 24, 32, 40, 48, 56]): 
-        '''plots kalman results across sessions and n'''
+        '''plots kalman results across sessions and n observations'''
 
         # just adding some labels and plot save the full plot across sessions
         for n in range(len(n_kalman)):
@@ -276,8 +280,9 @@ class trials_master:
         plt.close()  
 
     def frequency_transfer(self, x_input, x_min=-1, x_max=1, f_exp_min=500, f_exp_max=1300):
-        
-        # implementation of erb transfer function according to Glasberg & Moore, 1990, Eq. 4
+        '''compute frequency in Hz from input using the ERB transfer function
+        as implemented according to Glasberg & Moore, 1990, Eq. 4
+        '''
 
         e_min = 21.4 * np.log10(4.37 * f_exp_min / 1000 + 1)
         e_max = 21.4 * np.log10(4.37 * f_exp_max / 1000 + 1)
@@ -289,6 +294,7 @@ class trials_master:
         return freq_out 
 
     def plot_states(self, s, std, dev, tau_std, tau_dev, run_rules, si_q_arr, si_q_dev_arr, mu_tones):
+        '''plot states for one session'''
 
         contexts = ['std', 'dev']
 
@@ -369,6 +375,7 @@ class trials_master:
         plt.close()
 
     def plot_observations(self, s, obs_hz, run_contexts, run_rules, tau_std, dpos):
+        '''plot observations in Hz'''
 
         tau_std_seq = [[tau_std[s][x]]*self.config_H["N_blocks"]*self.config_H["N_tones"] for x in range(len(tau_std[s]))]
         tau_std_seq = np.concatenate(tau_std_seq)
@@ -451,8 +458,7 @@ class trials_master:
 
             for r in range(0, self.config_H["n_runs"]):
 
-                # change configuration dict
-
+                # change configuration dict for each run
                 self.config_H["fix_tau_val"] = [tau_std[s][r], tau_std[s][r]/8]
                 self.config_H["fix_lim_val"] = mu_tones[s][r][0]
 
@@ -460,7 +466,9 @@ class trials_master:
 
                 while unbalanced:
                     
-                    rules, _, dpos, _, _, contexts, states, obs, pars, pi_rules = gm.example_HGM(self.config_H)
+                    # use Cléms implementation to generate data per run
+                    hgm = gm.HierarchicalAuditGM(self.config_H)
+                    rules, _, dpos, _, _, contexts, states, obs, pars, pi_rules = hgm.generate_run(return_pars=True, return_pi_rules=self.config_H["return_pi_rules"])
 
                     # check if rules are balanced
                     p_r1 = sum(rules == 0)/len(rules)
@@ -494,7 +502,7 @@ class trials_master:
                         max_count = max(all_counts)
                         min_count = min(all_counts)
 
-                        if max_count - min_count > 1:
+                        if max_count - min_count > 1: # max. difference of 1 trial between occurrences of deviant positions
                             continue
                         else:
                             unbalanced = False
@@ -504,9 +512,10 @@ class trials_master:
                             states_dev = states[1]
                             mu_tones[s][r][1] = pars[1][1]
 
-                # plot probabilities run
+                # plot probabilities per run
                 self.plot_probabilities(rules, dpos, r+1, f'session_{s+1}_run')
                 
+                # collect data across runs
                 run_rules.append(rules)
                 run_dpos.append(dpos)
                 run_contexts.append(contexts)
@@ -514,7 +523,7 @@ class trials_master:
                 run_states_dev.append(states_dev)
                 run_obs.append(obs)   
                 
-            # plot probabilities session
+            # plot probabilities per session
             run_rules = np.concatenate(run_rules)
             rules_long = np.repeat(run_rules, self.config_H["N_tones"])
 
@@ -524,6 +533,9 @@ class trials_master:
             run_states_dev = np.concatenate(run_states_dev)
             run_obs = np.concatenate(run_obs) 
 
+            self.plot_probabilities(run_rules, run_dpos, s+1, 'overall_session')
+
+            # generate some variables for output file
             tau_std_seq = [[tau_std[s][x]]*self.config_H["N_blocks"]*self.config_H["N_tones"] for x in range(len(tau_std[s]))]
             tau_std_seq = np.concatenate(tau_std_seq)
 
@@ -535,16 +547,14 @@ class trials_master:
 
             lim_dev_seq = [[mu_tones[s][x][1]]*self.config_H["N_blocks"]*self.config_H["N_tones"] for x in range(len(mu_tones[s]))]
             lim_dev_seq = np.concatenate(lim_dev_seq)
-
-            self.plot_probabilities(run_rules, run_dpos, s+1, 'overall_session')
             
-            # plot states
+            # plot states for each session
             self.plot_states(s, run_states_std, run_states_dev, tau_std, tau_dev, run_rules, si_q_arr, si_q_dev_arr, mu_tones)
                 
-            # also use Kalman filter to each session
+            # apply Kalman filter to each session
             self.apply_kalman(s, run_obs, run_contexts, si_q_arr, mu_tones, tau_std, figy, axy)
 
-            # apply frequency transfer and plot
+            # apply frequency transfer to observations and plot observations in Hz
             obs_hz = []
             for observation in run_obs:
                 hz_val_erb = self.frequency_transfer(observation)
@@ -552,14 +562,14 @@ class trials_master:
             
             self.plot_observations(s, obs_hz, run_contexts, run_rules, tau_std, run_dpos)   
 
-            # save session output file for experiment  
-            iti_range = np.arange(7, 12, 0.5)
+            # save session output file to read in for experiment in psychopy
+            iti_range = np.arange(7, 12, 0.5) # ITI range (change for fMRI)
             ITI =[]
 
             for i in range(0,len(run_dpos)):
                 ITI.append(np.random.choice(iti_range))
 
-            trials_final = pd.DataFrame(columns=['observation', 'frequency',  'state_std', 'state_dev','lim_std','lim_dev','tau_std','tau_dev',
+            trials_final = pd.DataFrame(columns=['observation', 'frequency', 'state_std', 'state_dev','lim_std','lim_dev','tau_std','tau_dev', 'd',
                                                  'rule','dpos','trial_type','sigma_q_std','sigma_q_dev','sigma_r','ITI','duration_tones','ISI','trial_n','run_n','session_n'])
             
             trials_final['observation'] = run_obs
@@ -572,6 +582,8 @@ class trials_master:
 
             trials_final['tau_std'] = tau_std_seq
             trials_final['tau_dev'] = tau_dev_seq
+
+            trials_final['d'] = np.repeat(self.config_H["fix_d_val"], self.config_H["N_tones"]*self.config_H["N_blocks"]*self.config_H["n_runs"])
 
             trials_final['rule'] = rules_long
 
@@ -595,6 +607,7 @@ class trials_master:
             session_duration = ((((self.config_H["N_tones"]-1)*self.config_H["isi"])+(self.config_H["N_tones"]*self.config_H["duration_tones"]))*self.config_H["N_blocks"]*(len(tau_std[s]))) + sum(trials_final['ITI'][::8])
             print(f'Estimated session duration in minutes: {session_duration/60}')
 
+        # plot Kalman results across sessions
         self.plot_kalman(figy, axy, n_kalman = [8, 16, 24, 32, 40, 48, 56])        
             
 if __name__ == "__main__":
