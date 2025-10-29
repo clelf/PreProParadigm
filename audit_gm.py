@@ -519,9 +519,13 @@ class AuditGenerativeModel:
         states = dict([(int(c), np.zeros(contexts.shape)) for c in range(self.N_ctx)])
 
         # --- STD process: update at every timestep ---
+        # Randomly initialize state for std process at first tone of first block only
+        states[0][0, 0] = self._sample_N_(lim[0], si_stat).item()
+
         for b in range(self.N_blocks):
-            # Initial state for std process
-            states[0][b, 0] = self._sample_N_(lim[0], si_stat).item()
+            # Initial state for std process as the last value of the previous block
+            states[0][b, 0] = states[0][b - 1, -1] if b > 0 else states[0][0, 0]
+
             # Sample noise for std process
             w_std = self._sample_N_(0, si_q[0], contexts.shape[1])
             for t in range(1, contexts.shape[1]):
@@ -530,15 +534,14 @@ class AuditGenerativeModel:
 
         # --- DVT process: update only at deviant position in each block ---
         if self.N_ctx > 1:
-            for b in range(self.N_blocks):
-                # Initial state for dvt process
-                if b == 0:
-                    # Sample the first value around the process' stationary value
-                    states[1][b, :] = self._sample_N_(lim[1], si_stat, size=1)
-                else:
-                    # LGD update at block level: x[b] = x[b-1] + 1/tau * (lim - x[b-1]) + noise
-                    w_dvt = self._sample_N_(0, si_q[1], size=1)
-                    states[1][b, :] = states[1][b - 1, 0] + 1 / tau[1] * (lim[1] - states[1][b - 1, 0]) + w_dvt
+            # Sample the first value around the process' stationary value
+            states[1][b, :] = self._sample_N_(lim[1], si_stat, size=1)
+
+            for b in range(1,self.N_blocks):
+                # LGD update at block level: x[b] = x[b-1] + 1/tau * (lim - x[b-1]) + noise
+                w_dvt = self._sample_N_(0, si_q[1], size=1)
+                states[1][b, :] = states[1][b - 1, :] + 1 / tau[1] * (lim[1] - states[1][b - 1, :]) + w_dvt
+                
 
         if return_pars:
             # return states, a, d
