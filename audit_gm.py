@@ -339,7 +339,7 @@ class AuditGenerativeModel:
         evts = np.zeros(N_evt, dtype=np.int64)
 
         # Initilize context (assign to 0, randomly, or from the distribution from which the transition probas also come from)
-        evts[0] = np.random.choice(N_evt)
+        evts[0] = np.random.choice(N_val)
 
         for s in range(1, N_evt):
             # Markov chain
