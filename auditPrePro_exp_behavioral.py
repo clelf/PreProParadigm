@@ -23,9 +23,9 @@ from psychopy import prefs
 prefs.general['version'] = '2025.1.1'
 prefs.hardware['keyboard'] = 'ptb'
 prefs.hardware['audioLib'] = 'ptb'
-prefs.hardware['audioLatencyMode'] = '3' # could also use 4 but then no fallback in case of small deviations
-# prefs.hardware['audioDevice'] = 'Externe Kopfhörer' # bluetooth headphones Jasmin
-prefs.hardware['audioDevice'] = 'Mac mini-Lautsprecher' # mac mini speakers Jasmin
+prefs.hardware['audioLatencyMode'] = '4' # could also use 4 but then no fallback in case of small deviation
+prefs.hardware['audioDevice'] = 'Externe Kopfhörer' # cable headphones
+#prefs.hardware['audioDevice'] = 'Mac mini-Lautsprecher' # mac mini speakers
 
 #---- check psychopy version
 from psychopy import useVersion
@@ -40,6 +40,7 @@ from psychtoolbox import audio
 from psychtoolbox import PsychPortAudio
 
 from psychopy import sound
+import sounddevice as sd
 from psychopy.sound import backend_ptb as ptb_back
 from psychopy import core
 from psychopy import visual
@@ -238,7 +239,6 @@ feedback_duration = 1 # feedback duration
 #---- read in the pre-created trial lists
 trials = pd.read_csv(f'{trial_list_dir}sub-{participant}/sub-{participant}_ses-{session}_trials.csv')
 trials['dpos'] = trials['dpos'].fillna(0).astype(int)
-#trials = trials.iloc[:8] # trials for testing
 n_trials = len(trials)/8
 
 #---- more important variables
@@ -260,12 +260,11 @@ for i in range(0, len(trials), 8):
     win.flip()
     
     waveform = []
-    oddball_trial = trials['observation'][i:i + 8]
+    oddball_trial = trials['frequency'][i:i + 8]
     
     dpos_trial = trials['dpos'][i:i+8]
     dposy = dpos_trial.iloc[0]
     dposy = int(dposy)
-    print(dposy)
     dpos.append(dposy)
     
     run_trial = trials['run_n'][i:i+8]
@@ -359,7 +358,7 @@ for i in range(0, int(n_trials) + 1):
 
         # compute accuracy for full run to present to participant
         accuracy_run = ((len(np.where(np.array(performance[trial_run_slow[0]:trial_run_slow[1]]) == 1)[0]) + len(np.where(np.array(performance[trial_run_slow[0]:trial_run_slow[1]]) == 4)[0]))/len(performance[trial_run_slow[0]:trial_run_slow[1]]))*100
-        message.text = f"% korrekte Antworten in diesem Durchgang: {accuracy_run: .2f}\n\n\nKurze Pause!"
+        message.text = f"% korrekte Antworten in diesem Durchgang: {accuracy_run: .2f}\n\n\nKurze Pause!\n\n\nWeiter geht's mit der Leertaste"
         message.draw()
         win.flip()
         
@@ -397,14 +396,17 @@ for i in range(0, int(n_trials) + 1):
         
         if runs[i] == 5:
              data.to_csv(f'logfiles_behavioral/sub-{participant}-ses-{session}-run-{str(runs[i]-1).zfill(2)}-events_{date}.tsv', sep='\t', index=False)
+             break
         else:
             data.to_csv(f'logfiles_behavioral/sub-{participant}-ses-{session}-run-{str(runs[i]).zfill(2)}-events_{date}.tsv', sep='\t', index=False)
         
             # wait for space key press to initialize next run
-            print('Drücke die Leertaste, um den nächsten Block zu starten.')
             pause_kb = keyboard.Keyboard(backend = 'ptb')
             pause_keys = pause_kb.waitKeys(keyList=['space'], waitRelease=False)
-        
+            message.text = '+'
+            message.draw()
+            win.flip()
+    
     # play audio sequences from buffer
     PsychPortAudio('UseSchedule', pahandle, 1)  # 1 = replace current schedule
     PsychPortAudio('AddToSchedule', pahandle, buffer_handles[i])
@@ -521,8 +523,9 @@ for i in range(0, int(n_trials) + 1):
     single_onsets = [onset + i * (stim_dur + isi_dur) for i in range(8)]
     onset_tones.append(single_onsets) # theoretical onsets based on measured trial start
     duration_sound.append(trial_duration) # theoretical trial duration
+    offset_sound.append(onset + trial_duration)
     offset_sound_getsecs.append(offset_stimulus) # based on getsecs
-    duration_sound_getsecs.append(offset_stimulus-onset) # based on getsexs
+    duration_sound_getsecs.append(offset_stimulus-onset) # based on getsecs
     onset_iti_list_getsecs.append(onset_iti) # based on getsecs
     offset_iti_list_getsecs.append(offset_iti)
     onset_iti_list.append(onset + trial_duration) # theoretical based on measured onset + known duration
