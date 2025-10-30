@@ -511,7 +511,7 @@ class trials_master:
                             hgm.plot_combined_with_matrix(states[0], states[1], obs, contexts, rules, dpos, pars, pi_rules=pi_rules, text=False)
                             fig = plt.gcf() 
                             fig.savefig(f"trial_lists/sub-{self.config_H['participant_nr']}/plots/lgd_std_dev_session_{s+1}_run{r+1}_plot_clem.png", dpi=300, bbox_inches='tight')
-                            plt.close('all')                             
+                            plt.close()                             
                             
                             si_q_arr.append(pars[3][0])
                             si_q_dev_arr.append(pars[3][1])
