@@ -1,24 +1,40 @@
 '''
-USAGE NOTES
+USAGE NOTES SCRIPT
 - run in (standalone version of) psychoPy v 2025.1.1
 - test: psychopy & psychopy backend should be callable --> critical TODO test on MPI Linux
 - set prefs.hardware['audioDevice'] to the name of your local audio device
 - if necessary change window size for screen presentation
-- if necessary change sampling rate for audio
-- if necessary: change key_pos --> here, I am using a US keyboard layout
-- if necessary: adjust pahandle to your machine
+- if necessary change sampling rate for audio (var sample_rate)
+- if necessary: change key_pos (should be v, z, u, i, l keys with the right hand) --> here, I am using a US keyboard layout
+- if necessary: adjust pahandle to your machine (should be fine though)
 - if desired: change implementation of harmonics
-- run generate_task_sequences.py first to generate sequences, then run this experiment from the same directory (now containing trial_lists directory)
+- run generate_task_sequences.py first to generate sequences, then run this experiment from the same directory (now containing a trial_lists directory)
+- input: participant nr. as specified during generate_task_sequences.py and session number as 01, 02, 03, 04, 05, or 06
+'''
+
+'''
+TASK
+- identify the deviant at the end of each trial of eight tones (as soon as the fixation cross turns blue, you can answer)
+- answer within 1.5 s, otherwise too slow
+- keypresses:
+        - v = dev 3
+        - z = dev 4
+        - u = dev 5
+        - i = dev 6
+        - l = dev 7
+- if a key was pressed during response window: indicate how confident you are in your response
+- press space to continue after breaks between runs and to end the experiment of the last screen
+- press esc to exit anytime
 '''
 
 '''
 NOTES on RT Implementation:
 - for behavioral experiment rely on ptb.GetSecs()
 --> might need to rethink for scanner --> see other version of script
---> big TODO: think of testing key precision of different implementations
+--> big TODO: think of testing key precision of different implementations & scanner hardware delay
 '''
 
-#---- set preferences first --> ATTENTION: manually use ptb backend for keyboard later on anyways on MAC!
+#---- set preferences first --> ATTENTION: manually use ptb backend for keyboard later on anyways on Mac!
 from psychopy import prefs
 prefs.general['version'] = '2025.1.1'
 prefs.hardware['keyboard'] = 'ptb'
