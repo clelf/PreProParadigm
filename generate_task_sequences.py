@@ -25,7 +25,7 @@ class trials_master:
 
         self.config_H = {
 
-            "participant_nr": 'testy', # participant nr, as also read in by PsychPy exp.
+            "participant_nr": 'test_participant', # participant nr, as also read in by PsychPy exp.
             "N_samples": 1,
             "N_blocks": 60, # number of trials
             "N_tones": 8, # number of tones in each trial
@@ -506,6 +506,13 @@ class trials_master:
                             continue
                         else:
                             unbalanced = False
+
+                            # plot run using Cléms plotting approach
+                            hgm.plot_combined_with_matrix(states[0], states[1], obs, contexts, rules, dpos, pars, pi_rules=pi_rules, text=False)
+                            fig = plt.gcf() 
+                            fig.savefig(f"trial_lists/sub-{self.config_H['participant_nr']}/plots/lgd_std_dev_session_{s+1}_run{r+1}_plot_clem.png", dpi=300, bbox_inches='tight')
+                            plt.close('all')                             
+                            
                             si_q_arr.append(pars[3][0])
                             si_q_dev_arr.append(pars[3][1])
                             states_std = states[0]
@@ -548,7 +555,7 @@ class trials_master:
             lim_dev_seq = [[mu_tones[s][x][1]]*self.config_H["N_blocks"]*self.config_H["N_tones"] for x in range(len(mu_tones[s]))]
             lim_dev_seq = np.concatenate(lim_dev_seq)
             
-            # plot states for each session
+            # plot states for each full session
             self.plot_states(s, run_states_std, run_states_dev, tau_std, tau_dev, run_rules, si_q_arr, si_q_dev_arr, mu_tones)
                 
             # apply Kalman filter to each session
@@ -607,7 +614,7 @@ class trials_master:
             session_duration = ((((self.config_H["N_tones"]-1)*self.config_H["isi"])+(self.config_H["N_tones"]*self.config_H["duration_tones"]))*self.config_H["N_blocks"]*(len(tau_std[s]))) + sum(trials_final['ITI'][::8])
             print(f'Estimated session duration in minutes: {session_duration/60}')
 
-        # plot Kalman results across sessions
+        # plot Kalman results across all sessions
         self.plot_kalman(figy, axy, n_kalman = [8, 16, 24, 32, 40, 48, 56])        
             
 if __name__ == "__main__":
@@ -618,4 +625,4 @@ if __name__ == "__main__":
     print("=== Generating Trials ===")
     task.generate_sessions() 
     end = time.time()
-    print(f"=== Total Time: {(end-start)/60} ===")
+    print(f"=== Total Run Time Script: {(end-start)/60} ===")
