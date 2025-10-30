@@ -535,7 +535,7 @@ class AuditGenerativeModel:
         # --- DVT process: update only at deviant position in each block ---
         if self.N_ctx > 1:
             # Sample the first value around the process' stationary value
-            states[1][b, :] = self._sample_N_(lim[1], si_stat, size=1)
+            states[1][0, :] = self._sample_N_(lim[1], si_stat, size=1)
 
             for b in range(1,self.N_blocks):
                 # LGD update at block level: x[b] = x[b-1] + 1/tau * (lim - x[b-1]) + noise
@@ -1199,7 +1199,7 @@ class HierarchicalAuditGM(AuditGenerativeModel):
 
         plt.tight_layout(rect=[0, 0, 1, 1])
         plt.subplots_adjust(left=0.05, right=0.98, top=0.95, bottom=0.08, wspace=0.25, hspace=0.25)
-        plt.show()
+        #plt.show()
 
     def plot_rules_dpos(self, rules, dpos, pars, text=True):
 
