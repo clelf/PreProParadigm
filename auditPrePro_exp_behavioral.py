@@ -181,13 +181,6 @@ slider = visual.Slider(
     color='DarkSlateBlue',
     markerColor='Red'
 )
-question = visual.TextStim(
-    win=win,
-    text="Wie sicher bist du dir bei deiner Antwort?",
-    pos=(0, 150),
-    color="black",
-    height=30
-)
 
 #---- functions to generate soundwaves for the sounds and ISI/ITI
 def generate_timbre_waveform(frequency = 1450.0, harmonics = [(1, 1.0), (2, 0.5), (3, 0.33), (4, 0.25), (5, 0.2)], duration = 0.1, sample_rate= 48000, ramp_time = 0.01, hanning = True):
@@ -357,10 +350,9 @@ for t in range(n_triggers_to_wait): # start on the first space press for behavio
 #---- show fixation cross
 message.text = '+'
 message.height = 30
+message.pos = (0, 0)
 message.draw()
 win.flip()
-
-message_text = "+"
 
 #---- play oddball sequences and record logfiles separately for each run
 for i in range(0, int(n_trials) + 1):
@@ -433,14 +425,14 @@ for i in range(0, int(n_trials) + 1):
     
     phase ='stimulus'
     key_pressed = False
+    feedback_recorded = False
     slider_rating = None
     slider_start = None
     slider_end = None
     slider_time = 0
-    max_slider_time = 2 # max time for slider presentation = 4 seconds
+    max_slider_time = 2 # max time for slider presentation = 2 seconds
     slider.reset()
     #response_kb = keyboard.Keyboard(backend = 'ptb')
-    message_color = (1, 1, 1)
 
     # play audio sequences from buffer
     PsychPortAudio('UseSchedule', pahandle, 1)  # 1 = replace current schedule
@@ -462,22 +454,21 @@ for i in range(0, int(n_trials) + 1):
                 if elapsed-onset <= trial_duration:
                    message.text = '+'
                    message.color = (1, 1, 1)
-                   message.draw()
+                   message.pos = (0, 0)
                    offset_stimulus = elapsed
                
                 else:
                     phase = 'response'
                     response_start = ptb.GetSecs()
                     onset_iti = ptb.GetSecs()
-                    continue
                   
             elif phase == 'response':
                 
                 if key_pressed == False:
 
                     message.text = "bitte jetzt antworten"
+                    message.pos = (0, 0)
                     message.color = (1, 1, 1)
-                    message.draw()
                     
                     response_keys = response_kb.getKeys(key_pos, waitRelease=False)
 
@@ -487,12 +478,14 @@ for i in range(0, int(n_trials) + 1):
                         key_rt = ptb.GetSecs() - response_start
                         phase = 'slider'
                         slider_start = ptb.GetSecs()
-                        continue
+                        message.text = "Wie sicher bist du dir?"
+                        message.pos = (0, 110)
                     
                     elif elapsed-onset > trial_duration + response_window:
                         phase = 'slider'
                         slider_start = ptb.GetSecs()
-                        continue
+                        message.text = "Wie sicher bist du dir?"
+                        message.pos = (0, 110)
                         
             elif phase == 'slider':
 
@@ -503,38 +496,46 @@ for i in range(0, int(n_trials) + 1):
                     confidence.append(slider_rating)
                     phase = 'feedback'
                     feedback_start = ptb.GetSecs()
-                    continue
             
                 elif ptb.GetSecs() - slider_start > max_slider_time and slider_rating is None:
                     phase = 'feedback'
                     feedback_start = ptb.GetSecs()
-                    continue
 
             elif phase == 'feedback':
+
+                if not feedback_recorded:
                 
-                if dpos[i] != 0 and key_pressed:
-                    correct_key = dpos[i] - 2
-                    key_posy = key_pos.index(key_name)
+                    if dpos[i] != 0 and key_pressed:
+                        correct_key = dpos[i] - 2
+                        key_posy = key_pos.index(key_name)
+                        
+                        if correct_key == key_posy:
+                            performance.append(1)
+                            message.color = (0, 1, 0)
+                            message.text = "richtig"
+                            message.pos = (0, 0)
+                            feedback_recorded = True
+                            
+                        else:
+                            performance.append(0)
+                            message.color = (1, 0, 0)
+                            message.text = "falsch"
+                            message.pos = (0, 0)
+                            feedback_recorded = True
                     
-                    if correct_key == key_posy:
-                        performance.append(1)
+                    elif dpos[i] == 0 and not key_pressed:
+                        performance.append(4)
                         message.color = (0, 1, 0)
                         message.text = "richtig"
+                        message.pos = (0, 0)
+                        feedback_recorded = True
                         
-                    else:
-                        performance.append(0)
+                    elif dpos[i] != 0 and not key_pressed:
+                        performance.append(3)
                         message.color = (1, 0, 0)
                         message.text = "falsch"
-                   
-                elif dpos[i] == 0 and not key_pressed:
-                    performance.append(4)
-                    message.color = (0, 1, 0)
-                    message.text = "richtig"
-                    
-                elif dpos[i] != 0 and not key_pressed:
-                    performance.append(3)
-                    message.color = (1, 0, 0)
-                    message.text = "falsch"
+                        message.pos = (0, 0)
+                        feedback_recorded = True
 
                 if ptb.GetSecs() - feedback_start <= feedback_duration:
                     message.color = message.color
@@ -542,11 +543,13 @@ for i in range(0, int(n_trials) + 1):
                     feedback = False
                     message.color = (1,1,1)
                     message.text = '+'
+                    message.pos = (0, 0)
+                    feedback_recorded = True  
 
             if phase in ['stimulus','response','feedback']:
                 message.draw()
             elif phase == 'slider':
-                question.draw()
+                message.draw()
                 slider.draw()
             
             win.flip()
@@ -555,6 +558,7 @@ for i in range(0, int(n_trials) + 1):
             offset_iti = ptb.GetSecs()
             message.color = (1, 1, 1)
             message.text = '+'
+            message.pos = (0, 0)
             message.draw()
             win.flip()
             break
