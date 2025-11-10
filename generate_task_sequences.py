@@ -570,11 +570,11 @@ class trials_master:
             self.plot_observations(s, obs_hz, run_contexts, run_rules, tau_std, run_dpos)   
 
             # save session output file to read in for experiment in psychopy
-            iti_range = np.arange(7, 12, 0.5) # ITI range (change for fMRI)
+            iti_range = 5# np.arange(7, 12, 0.5) # ITI range (change for fMRI)
             ITI =[]
 
             for i in range(0,len(run_dpos)):
-                ITI.append(np.random.choice(iti_range))
+                ITI.append(iti_range)# ITI.append(np.random.choice(iti_range))
 
             trials_final = pd.DataFrame(columns=['observation', 'frequency', 'state_std', 'state_dev','lim_std','lim_dev','tau_std','tau_dev', 'd',
                                                  'rule','dpos','trial_type','sigma_q_std','sigma_q_dev','sigma_r','ITI','duration_tones','ISI','trial_n','run_n','session_n'])

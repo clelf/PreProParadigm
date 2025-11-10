@@ -40,8 +40,9 @@ prefs.general['version'] = '2025.1.1'
 prefs.hardware['keyboard'] = 'ptb'
 prefs.hardware['audioLib'] = 'ptb'
 prefs.hardware['audioLatencyMode'] = '4' # could also use 4 but then no fallback in case of small deviation
-prefs.hardware['audioDevice'] = 'Externe Kopfhörer' # cable headphones
-#prefs.hardware['audioDevice'] = 'Mac mini-Lautsprecher' # mac mini speakers
+#prefs.hardware['audioDevice'] = 'Externe Kopfhörer' # cable headphones
+prefs.hardware['audioDevice'] = 'Mac mini-Lautsprecher' # mac mini speakers
+#prefs.hardware['audioDevice'] = 'Speakers (Realtek HD Audio output)'
 
 #---- check psychopy version
 from psychopy import useVersion
@@ -50,10 +51,14 @@ useVersion('2025.1.1')
 import psychopy
 print(f"Running PsychoPy {psychopy.__version__}")
 
+from psychopy import sound
+from psychtoolbox import PsychPortAudio
+
 #---- imports
 import psychtoolbox as ptb
 from psychtoolbox import audio
 from psychtoolbox import PsychPortAudio
+PsychPortAudio('Close')
 
 from psychopy import sound
 import sounddevice as sd
@@ -351,8 +356,11 @@ for t in range(n_triggers_to_wait): # start on the first space press for behavio
   
 #---- show fixation cross
 message.text = '+'
+message.height = 30
 message.draw()
 win.flip()
+
+message_text = "+"
 
 #---- play oddball sequences and record logfiles separately for each run
 for i in range(0, int(n_trials) + 1):
@@ -423,113 +431,132 @@ for i in range(0, int(n_trials) + 1):
             message.draw()
             win.flip()
     
-    # play audio sequences from buffer
-    PsychPortAudio('UseSchedule', pahandle, 1)  # 1 = replace current schedule
-    PsychPortAudio('AddToSchedule', pahandle, buffer_handles[i])
-    onset = PsychPortAudio('Start', pahandle, 1, 0, 1) # measure onset trial based on PsychPortAudio
-        
+    phase ='stimulus'
     key_pressed = False
-    feedback = False
     slider_rating = None
     slider_start = None
     slider_end = None
     slider_time = 0
-    max_slider_time = 4 # max time for slider presentation = 4 seconds
+    max_slider_time = 2 # max time for slider presentation = 4 seconds
     slider.reset()
     #response_kb = keyboard.Keyboard(backend = 'ptb')
     message_color = (1, 1, 1)
+
+    # play audio sequences from buffer
+    PsychPortAudio('UseSchedule', pahandle, 1)  # 1 = replace current schedule
+    PsychPortAudio('AddToSchedule', pahandle, buffer_handles[i])
+    onset = PsychPortAudio('Start', pahandle, 1, 0, 1) # measure onset trial based on PsychPortAudio
     
     while True:
         
         elapsed = ptb.GetSecs() 
         
         # make experiment closable by Esc key press
-        escape_keys = escape_kb.getKeys(keyList=['escape'], waitRelease=False)
-        if 'escape' in [k.name for k in escape_keys]:
-            core.quit()
-            sys.exit()
+        if 'escape' in [k.name for k in escape_kb.getKeys(['escape'], waitRelease=False)]:
+            core.quit(); sys.exit()
+        
+        elif elapsed - onset <= (len_waveform[i] / sample_rate):
 
-        if elapsed-onset <= (len_waveform[i] / sample_rate):
-            
-            if elapsed-onset <= trial_duration:
-                offset_stimulus = elapsed
-                onset_iti = ptb.GetSecs()
+            if phase == 'stimulus':
                 
-            offset_iti = elapsed
-              
-            if elapsed - onset > trial_duration and elapsed - onset <= (trial_duration + response_window):
-                
-                message_color = (0, 0, 1)
-                # here, keyoard clock could be reset to get .rt
-                response_keys = response_kb.getKeys(key_pos, waitRelease=False)
-                
-                if response_keys and not key_pressed: # record only first response --> change?
-                    key_time = ptb.GetSecs()
-                    key_rt = key_time - offset_stimulus
-                    key_name = response_keys[0].name
-                    key_pressed = True
-                    
-                    slider_start = ptb.GetSecs()
-
-                    while ptb.GetSecs() - slider_start <= max_slider_time and slider_rating is None:
-                        question.draw()
-                        slider.draw()
-                        win.flip()
-
-                        if slider.getRating() is not None:
-                            slider_rating = slider.getRating()
-                            slider_end = ptb.GetSecs()
-                            slider_time = slider_end - slider_start
-                            confidence.append(slider_rating)
-
-                    # if time ran out with no rating, still record
-                    if slider_rating is None:
-                        slider_rating = slider.getRating()
-                        slider_end = ptb.GetSecs()
-                        slider_time = slider_end - slider_start
-                        confidence.append(slider_rating)
-                        
-                    # add whether pressed key is correct or not
-                    if dpos[i] != 0:                     
-                         correct_key = dpos[i] - 2
-                         key_posy = key_pos.index(key_name)
-                         
-                         if correct_key == key_posy:
-                             performance.append(1)
-                             # add visual feedback (turn fixation green) --> duration?
-                             feedback_color = (0, 1, 0)
-                         else:
-                             performance.append(0)
-                             # add visual feedback (turn fixation red) --> duration?
-                             feedback_color = (1, 0, 0)
-                    else:
-                         performance.append(2) # false alarm in omission trials
-                         feedback_color = (1, 0, 0)
-                    
-                    feedback = True
-                    feedback_start = ptb.GetSecs()
-
-            if feedback:
-                if ptb.GetSecs() - feedback_start <= feedback_duration:
-                    message_color = feedback_color
+                if elapsed-onset <= trial_duration:
+                   message.text = '+'
+                   message.color = (1, 1, 1)
+                   message.draw()
+                   offset_stimulus = elapsed
+               
                 else:
-                    feedback = False  # feedback expired
-                    message_color = (0, 0, 1) # back to blue
-                 
-            # draw fixation/message and flip
-            message.color = message_color
-            message.draw()
+                    phase = 'response'
+                    response_start = ptb.GetSecs()
+                    onset_iti = ptb.GetSecs()
+                    continue
+                  
+            elif phase == 'response':
+                
+                if key_pressed == False:
+
+                    message.text = "bitte jetzt antworten"
+                    message.color = (1, 1, 1)
+                    message.draw()
+                    
+                    response_keys = response_kb.getKeys(key_pos, waitRelease=False)
+
+                    if response_keys and not key_pressed:
+                        key_pressed = True
+                        key_name = response_keys[0].name
+                        key_rt = ptb.GetSecs() - response_start
+                        phase = 'slider'
+                        slider_start = ptb.GetSecs()
+                        continue
+                    
+                    elif elapsed-onset > trial_duration + response_window:
+                        phase = 'slider'
+                        slider_start = ptb.GetSecs()
+                        continue
+                        
+            elif phase == 'slider':
+
+                if slider.getRating() is not None:
+                    slider_rating = slider.getRating()
+                    slider_end = ptb.GetSecs()
+                    slider_time = slider_end - slider_start
+                    confidence.append(slider_rating)
+                    phase = 'feedback'
+                    feedback_start = ptb.GetSecs()
+                    continue
+            
+                elif ptb.GetSecs() - slider_start > max_slider_time and slider_rating is None:
+                    phase = 'feedback'
+                    feedback_start = ptb.GetSecs()
+                    continue
+
+            elif phase == 'feedback':
+                
+                if dpos[i] != 0 and key_pressed:
+                    correct_key = dpos[i] - 2
+                    key_posy = key_pos.index(key_name)
+                    
+                    if correct_key == key_posy:
+                        performance.append(1)
+                        message.color = (0, 1, 0)
+                        message.text = "richtig"
+                        
+                    else:
+                        performance.append(0)
+                        message.color = (1, 0, 0)
+                        message.text = "falsch"
+                   
+                elif dpos[i] == 0 and not key_pressed:
+                    performance.append(4)
+                    message.color = (0, 1, 0)
+                    message.text = "richtig"
+                    
+                elif dpos[i] != 0 and not key_pressed:
+                    performance.append(3)
+                    message.color = (1, 0, 0)
+                    message.text = "falsch"
+
+                if ptb.GetSecs() - feedback_start <= feedback_duration:
+                    message.color = message.color
+                else:
+                    feedback = False
+                    message.color = (1,1,1)
+                    message.text = '+'
+
+            if phase in ['stimulus','response','feedback']:
+                message.draw()
+            elif phase == 'slider':
+                question.draw()
+                slider.draw()
+            
             win.flip()
                     
-        elif elapsed-onset > (len_waveform[i] / sample_rate):
+        elif elapsed - onset > (len_waveform[i] / sample_rate):
+            offset_iti = ptb.GetSecs()
             message.color = (1, 1, 1)
+            message.text = '+'
             message.draw()
             win.flip()
-            # add if response is missing
-            if not key_pressed and dpos[i] != 0:
-                performance.append(3) # miss
-            if not key_pressed and dpos[i] == 0:
-                performance.append(4) # correct omission of response in trials w/o deviant
             break
     
     # record come timing variables --> finalize
