@@ -20,9 +20,9 @@ USAGE NOTES EXPERIMENT (auditPrePro_exp_behavioral.py)
 - if necessary change your local keyboard layout to US
 
 - task: listen to sequences of eight sounds (possible deviant in any position 3-7), rarely, trials don't have a deviant
-- as soon as fixation cross turns blue in each trial, identify the position of the deviant via keypress
+- as soon as asked to answer, identify the position of the deviant via keypress
 - keys: v,z,u,i,l (German layout) or v,y,u,i,l (US layout)
 - use the right hand to answer: v = position 3, z/y = position 4, etc.
 - response window = 1.5 seconds
-- after response: indicate how confident you are in your choice
+- after response or no response: indicate how confident you are in your choice
 - at the beginning and after each block: press space to continue
