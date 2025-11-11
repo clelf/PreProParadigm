@@ -425,6 +425,7 @@ for i in range(0, int(n_trials) + 1):
     
     phase ='stimulus'
     key_pressed = False
+    feedback_first_frame = False
     feedback_recorded = False
     slider_rating = None
     slider_start = None
