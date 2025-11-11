@@ -590,7 +590,7 @@ for i in range(0, int(n_trials) + 1):
 #---- display overall performance and wait for end (5 s wait, then space press ends the experiment)
 accuracy = ((len(np.where(np.array(performance) == 1)[0]) + len(np.where(np.array(performance) == 4)[0]))/len(performance))*100
 now = ptb.GetSecs()
-message.text = f"% korrekte Antworten insgesamt: {accuracy: .2f}\n\n\nEnde des Experiments, bitte gib der Versuchsleitung Bescheid!"
+message.text = f"% korrekte Antworten in diesem Durchgang: {accuracy_run: .2f}\n\n\n% korrekte Antworten insgesamt: {accuracy: .2f}\n\n\nEnde des Experiments, bitte gib der Versuchsleitung Bescheid!"
 message.color = (1, 1, 1)
 message.draw()
 win.flip()
