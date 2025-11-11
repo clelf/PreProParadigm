@@ -496,46 +496,52 @@ for i in range(0, int(n_trials) + 1):
                     confidence.append(slider_rating)
                     phase = 'feedback'
                     feedback_start = ptb.GetSecs()
+                    feedback_first_frame = True
             
                 elif ptb.GetSecs() - slider_start > max_slider_time and slider_rating is None:
                     phase = 'feedback'
                     feedback_start = ptb.GetSecs()
+                    feedback_first_frame = True
 
             elif phase == 'feedback':
 
-                if not feedback_recorded:
-                
-                    if dpos[i] != 0 and key_pressed:
-                        correct_key = dpos[i] - 2
-                        key_posy = key_pos.index(key_name)
+                if feedback_first_frame:
+
+                    if not feedback_recorded:
+                    
+                        if dpos[i] != 0 and key_pressed:
+                            correct_key = dpos[i] - 2
+                            key_posy = key_pos.index(key_name)
+                            
+                            if correct_key == key_posy:
+                                performance.append(1)
+                                message.color = (0, 1, 0)
+                                message.text = "richtig"
+                                message.pos = (0, 0)
+                                feedback_recorded = True
+                                
+                            else:
+                                performance.append(0)
+                                message.color = (1, 0, 0)
+                                message.text = "falsch"
+                                message.pos = (0, 0)
+                                feedback_recorded = True
                         
-                        if correct_key == key_posy:
-                            performance.append(1)
+                        elif dpos[i] == 0 and not key_pressed:
+                            performance.append(4)
                             message.color = (0, 1, 0)
                             message.text = "richtig"
                             message.pos = (0, 0)
                             feedback_recorded = True
                             
-                        else:
-                            performance.append(0)
+                        elif dpos[i] != 0 and not key_pressed:
+                            performance.append(3)
                             message.color = (1, 0, 0)
                             message.text = "falsch"
                             message.pos = (0, 0)
                             feedback_recorded = True
-                    
-                    elif dpos[i] == 0 and not key_pressed:
-                        performance.append(4)
-                        message.color = (0, 1, 0)
-                        message.text = "richtig"
-                        message.pos = (0, 0)
-                        feedback_recorded = True
-                        
-                    elif dpos[i] != 0 and not key_pressed:
-                        performance.append(3)
-                        message.color = (1, 0, 0)
-                        message.text = "falsch"
-                        message.pos = (0, 0)
-                        feedback_recorded = True
+
+                    feedback_first_frame = False        
 
                 if ptb.GetSecs() - feedback_start <= feedback_duration:
                     message.color = message.color
