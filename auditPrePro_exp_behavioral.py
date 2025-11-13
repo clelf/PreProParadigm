@@ -354,6 +354,19 @@ message.pos = (0, 0)
 message.draw()
 win.flip()
 
+question = visual.TextStim(win, text='Wie sicher bist du dir?')
+question.height = 30
+question.pos = (0, 100)
+
+prompt = visual.TextStim(win, text='bitte jetzt antworten')
+prompt.height = 30
+prompt.pos = (0, 0)
+
+feed = visual.TextStim(win, text='')
+feed.height = 30
+feed.pos = (0, 0)
+feed.pos = (0, 0)
+
 #---- play oddball sequences and record logfiles separately for each run
 for i in range(0, int(n_trials) + 1):
       
@@ -466,10 +479,6 @@ for i in range(0, int(n_trials) + 1):
             elif phase == 'response':
                 
                 if key_pressed == False:
-
-                    message.text = "bitte jetzt antworten"
-                    message.pos = (0, 0)
-                    message.color = (1, 1, 1)
                     
                     response_keys = response_kb.getKeys(key_pos, waitRelease=False)
 
@@ -479,15 +488,12 @@ for i in range(0, int(n_trials) + 1):
                         key_rt = ptb.GetSecs() - response_start
                         phase = 'slider'
                         slider_start = ptb.GetSecs()
-                        message.text = "Wie sicher bist du dir?"
-                        message.pos = (0, 110)
                     
                     elif elapsed-onset > trial_duration + response_window:
                         phase = 'slider'
                         slider_start = ptb.GetSecs()
-                        message.text = "Wie sicher bist du dir?"
-                        message.pos = (0, 110)
-                        
+
+
             elif phase == 'slider':
 
                 if slider.getRating() is not None:
@@ -500,6 +506,7 @@ for i in range(0, int(n_trials) + 1):
                     feedback_first_frame = True
             
                 elif ptb.GetSecs() - slider_start > max_slider_time and slider_rating is None:
+                    confidence.append(None)
                     phase = 'feedback'
                     feedback_start = ptb.GetSecs()
                     feedback_first_frame = True
@@ -516,47 +523,53 @@ for i in range(0, int(n_trials) + 1):
                             
                             if correct_key == key_posy:
                                 performance.append(1)
-                                message.color = (0, 1, 0)
-                                message.text = "richtig"
-                                message.pos = (0, 0)
+                                feed.color = (0, 1, 0)
+                                feed.text = "richtig"
                                 feedback_recorded = True
                                 
                             else:
                                 performance.append(0)
-                                message.color = (1, 0, 0)
-                                message.text = "falsch"
-                                message.pos = (0, 0)
+                                feed.color = (1, 0, 0)
+                                feed.text = "falsch"
                                 feedback_recorded = True
                         
                         elif dpos[i] == 0 and not key_pressed:
                             performance.append(4)
-                            message.color = (0, 1, 0)
-                            message.text = "richtig"
-                            message.pos = (0, 0)
+                            feed.color = (0, 1, 0)
+                            feed.text = "richtig"
                             feedback_recorded = True
                             
                         elif dpos[i] != 0 and not key_pressed:
                             performance.append(3)
-                            message.color = (1, 0, 0)
-                            message.text = "falsch"
-                            message.pos = (0, 0)
+                            feed.color = (1, 0, 0)
+                            feed.text = "falsch"
                             feedback_recorded = True
 
                     feedback_first_frame = False        
 
                 if ptb.GetSecs() - feedback_start <= feedback_duration:
-                    message.color = message.color
+                    feed.color = feed.color
                 else:
                     feedback = False
-                    message.color = (1,1,1)
-                    message.text = '+'
-                    message.pos = (0, 0)
+                    feed.color = (1,1,1)
+                    feed.text = '+'
+                    feed.pos = (0, 0)
                     feedback_recorded = True  
 
-            if phase in ['stimulus','response','feedback']:
+            # safety against losing feedback in frame drop or small timing variance on slider
+            if phase != 'feedback' and slider_time >= max_slider_time:
+                phase = 'feedback'
+                feedback_start = ptb.GetSecs()
+                feedback_first_frame = True
+                        
+            if phase == 'stimulus':
                 message.draw()
+            elif phase == 'feedback':
+                feed.draw()    
+            elif phase == 'response':
+                prompt.draw()    
             elif phase == 'slider':
-                message.draw()
+                question.draw()
                 slider.draw()
             
             win.flip()
