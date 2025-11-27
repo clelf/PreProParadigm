@@ -25,7 +25,7 @@ class trials_master:
 
         self.config_H = {
 
-            "participant_nr": 'test_participant', # participant nr, as also read in by PsychPy exp.
+            "participant_nr": 'sys_1', # participant nr, as also read in by PsychPy exp.
             "N_samples": 1,
             "N_blocks": 60, # number of trials
             "N_tones": 8, # number of tones in each trial
@@ -49,7 +49,7 @@ class trials_master:
             "fix_process": True, # fix tau, lim, d to input values
             "fix_tau_val": [16, 2], # tau std, tau dev
             "fix_lim_val": -0.6, # lim std
-            "fix_d_val": 2, # effect size d
+            "fix_d_val": 1, # effect size d
             "fix_pi": True,
             "fix_pi_vals": [0.8, 0.1, 0], # fixed values to create transition matrix
             "n_sessions": 6, # number of sessions
@@ -621,8 +621,23 @@ if __name__ == "__main__":
     
     task = trials_master() 
 
-    start = time.time()
-    print("=== Generating Trials ===")
-    task.generate_sessions() 
-    end = time.time()
-    print(f"=== Total Run Time Script: {(end-start)/60} ===")
+    cnt = -1
+
+    for d in [0.5,3]:#[1,2]:
+        for si_stat in [0.05, 0.1, 0.5]:
+            for si_r_rat in [0.5, 1]:
+
+                print(f"=== Generating Trials with d = {d}, si_stat = {si_stat}, si_r = {si_stat*si_r_rat}  ===")
+                
+                cnt+= 1
+                task.config_H["participant_nr"] = f"d{d}-si_stat{si_stat}-si_r{si_stat*si_r_rat}"
+                task.config_H["fix_d_val"] = d
+                task.config_H["si_stat"] = si_stat
+                task.config_H["si_r"] = si_stat*si_r_rat
+                task.config_H["n_sessions"] = 1
+
+                start = time.time()
+                print("=== Generating Trials ===")
+                task.generate_sessions() 
+                end = time.time()
+                print(f"=== Total Run Time Script: {(end-start)/60} ===")
