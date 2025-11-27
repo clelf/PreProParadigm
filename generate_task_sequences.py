@@ -623,7 +623,7 @@ if __name__ == "__main__":
 
     cnt = -1
 
-    for d in [0.5,3]:#[1,2]:
+    for d in [0.5,1,2]:
         for si_stat in [0.05, 0.1, 0.5]:
             for si_r_rat in [0.5, 1]:
 
