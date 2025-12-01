@@ -6,6 +6,15 @@ from tqdm import tqdm
 from matplotlib.ticker import MaxNLocator
 import matplotlib.gridspec as gridspec
 import matplotlib.colors as mcolors
+from multiprocessing import Pool, cpu_count
+
+# Try to import pathos for better multiprocessing (handles lambdas/closures)
+# Falls back to standard multiprocessing if not available
+try:
+    from pathos.multiprocessing import ProcessingPool
+    HAS_PATHOS = True
+except ImportError:
+    HAS_PATHOS = False
 
 
 
@@ -45,6 +54,10 @@ class AuditGenerativeModel:
         self.N_samples = params["N_samples"]
         self.N_blocks = params["N_blocks"]
         self.N_tones = params["N_tones"]
+
+        # Parallel processing: max_cores controls the number of workers
+        # Set to 1 to disable parallelization, None to use all available cores
+        self.max_cores = params.get("max_cores", None)
 
         # specify pi manually according to what I did before
         if "fix_pi" in params.keys():
@@ -90,35 +103,21 @@ class AuditGenerativeModel:
         # NOTE: this only happens in contexts where N_ctx is also == 1
         if "params_testing" in params.keys():
             self.params_testing = True
-            self.mu_tau_set, self.si_stat_set,self.si_r_set = None, None, None
+            self.mu_tau_bounds, self.si_stat_bounds, self.si_r_bounds = None, None, None
             if "mu_tau_bounds" in params.keys():
                 self.mu_tau_bounds = params["mu_tau_bounds"]
-                self.mu_tau_set = 10 ** np.random.uniform(
-                    low=np.log10(self.mu_tau_bounds["low"]),
-                    high=np.log10(self.mu_tau_bounds["high"]),
-                    size=self.N_samples
-                )
             if "si_stat_bounds" in params.keys():
                 self.si_stat_bounds = params["si_stat_bounds"]
-                self.si_stat_set = 10 ** np.random.uniform(
-                    low=np.log10(self.si_stat_bounds["low"]),
-                    high=np.log10(self.si_stat_bounds["high"]),
-                    size=self.N_samples
-                )
             if "si_r_bounds" in params.keys():
                 self.si_r_bounds = params["si_r_bounds"]
-                self.si_r_set = 10 ** np.random.uniform(
-                    low=np.log10(self.si_r_bounds["low"]),
-                    high=np.log10(self.si_r_bounds["high"]),
-                    size=self.N_samples
-                )
+                
             # COMMMENTED OUT AS NOT TESTING D NOW
             # if "si_d" in params.keys() and params["si_d"] and "mu_d" in params.keys():
             #     self.mu_d = params["mu_d"]
             #     si_d_ub = (4 - self.mu_d)/3
             #     si_d_lb = (self.mu_d - 0.1)/3
             #     self.si_d_set = np.random.uniform(si_d_lb, si_d_ub, self.N_samples)
-            
+                
         else:
             self.params_testing = False
 
@@ -567,12 +566,19 @@ class AuditGenerativeModel:
             2-dimensional sequence of observations of size (N_blocks, N_tones)
         """
 
-        obs = np.zeros(contexts.shape)
+        # Sample observation noise all at once
         v = self._sample_N_(0, self.si_r, contexts.shape)
 
-        for (b, t), c in np.ndenumerate(contexts):
-            # Picking the state corresponding to current context c and adding normal noise
-            obs[b, t] = states[c][b, t] + v[b, t]
+        # Vectorized observation sampling using context-based indexing
+        if self.N_ctx == 1:
+            # Single context case - direct indexing
+            obs = states[0] + v
+        else:
+            # Multi-context case - use np.where or advanced indexing
+            # Stack states into a 3D array: (N_ctx, N_blocks, N_tones)
+            states_stacked = np.stack([states[c] for c in range(self.N_ctx)], axis=0)
+            # Use contexts as index into first dimension
+            obs = np.take_along_axis(states_stacked, contexts[np.newaxis, :, :], axis=0)[0] + v
         
         return obs
 
@@ -628,6 +634,33 @@ class AuditGenerativeModel:
         plt.tight_layout()
         plt.show()
 
+    def _generate_single_sample(self, samp_idx):
+        """Generate one sample, optionally using pre-sampled parameters.
+        
+        This helper is called by generate_batch and can be parallelized.
+        
+        Parameters
+        ----------
+        samp_idx : int
+            Index of the sample to generate (used to fetch pre-sampled parameters).
+        
+        Returns
+        -------
+        list
+            Result from generate_run as a list.
+        """
+        # Override parameters for this sample if testing
+        if self.params_testing:
+            if self.mu_tau_set is not None:
+                self.mu_tau = self.mu_tau_set[samp_idx]
+            if self.si_stat_set is not None:
+                self.si_stat = self.si_stat_set[samp_idx]
+            if self.si_r_set is not None:
+                self.si_r = self.si_r_set[samp_idx]
+        
+        res = self.generate_run(return_pars=self._return_pars)
+        return [*res]
+
     def generate_batch(self, N_samples=None, return_pars=False):
         """Generate a batch of runs by repeatedly calling ``generate_run``.
 
@@ -651,25 +684,52 @@ class AuditGenerativeModel:
 
         if N_samples is None:
             N_samples = self.N_samples
+        
+        # Store return_pars for use by _generate_single_sample
+        self._return_pars = return_pars
+        
+        # Create sets of parameters to sample from if testing
+        self.mu_tau_set,self.si_stat_set,self.si_r_set = None, None, None
+        if self.params_testing:
+            if self.mu_tau_bounds is not None:
+                self.mu_tau_set = 10 ** np.random.uniform(
+                    low=np.log10(self.mu_tau_bounds["low"]),
+                    high=np.log10(self.mu_tau_bounds["high"]),
+                    size=N_samples
+                )
+            if self.si_stat_bounds is not None:
+                self.si_stat_set = np.random.uniform(
+                    low=self.si_stat_bounds["low"],
+                    high=self.si_stat_bounds["high"],
+                    size=N_samples
+                )
+            if self.si_r_bounds is not None:
+                self.si_r_set = np.random.uniform(
+                    low=self.si_r_bounds["low"],
+                    high=self.si_r_bounds["high"],
+                    size=N_samples
+                )
 
         batch = []
 
-        for samp in tqdm(range(N_samples), desc="Generating sequences", leave=False):
-            # Generate a batch of N_blocks sequences, sampling parameters and generating the paradigm's observations
-            # *res == rules, rules_long, dpos, timbres, timbres_long, contexts, states, obs(, pars) (HGM) // contexts, states, obs(, pars) (NHGM)
-            if self.params_testing:
-                # sample a set of params
-                if self.mu_tau_set is not None:
-                    self.mu_tau = self.mu_tau_set[samp]
-                if self.si_stat_set is not None:
-                    self.si_stat = self.si_stat_set[samp]
-                if self.si_r_set is not None:
-                    self.si_r = self.si_r_set[samp]
-                # COMMMENTED OUT AS NOT TESTING D NOW
-                # if self.si_d_set is not None:
-                #     self.si_d = self.si_d_set[samp]
-            res = self.generate_run(return_pars=return_pars)
-            batch.append([*res])
+        # Determine number of workers
+        if self.max_cores == 1:
+            # Explicitly disabled
+            use_parallel = False
+        elif HAS_PATHOS and N_samples > 1:
+            use_parallel = True
+            n_workers = self.max_cores if self.max_cores else min(cpu_count(), N_samples)
+        else:
+            use_parallel = False
+
+        # Generate samples
+        if use_parallel:
+            pool = ProcessingPool(nodes=n_workers)
+            batch = pool.map(self._generate_single_sample, range(N_samples))
+        else:
+            # Sequential processing
+            for samp in range(N_samples):
+                batch.append(self._generate_single_sample(samp))
 
         # Reorganize data as objects of size (N_samples, {obj_len}, 1) rather than a N_samples-long list of objects of size ({obj_len}, 1)
         # ! Except for the dictionary variable like states, that should keep the keys separate
