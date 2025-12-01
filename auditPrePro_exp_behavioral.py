@@ -41,12 +41,12 @@ prefs.hardware['keyboard'] = 'ptb'
 prefs.hardware['audioLib'] = 'ptb'
 prefs.hardware['audioLatencyMode'] = '4' # could also use 4 but then no fallback in case of small deviation
 #prefs.hardware['audioDevice'] = 'Externe Kopfhörer' # cable headphones
-prefs.hardware['audioDevice'] = 'Mac mini-Lautsprecher' # mac mini speakers
-#prefs.hardware['audioDevice'] = 'Speakers (Realtek HD Audio output)'
+#prefs.hardware['audioDevice'] = 'Mac mini-Lautsprecher' # mac mini speakers
+prefs.hardware['audioDevice'] = 'Speakers (Realtek HD Audio output)'
 
 #---- check psychopy version
 from psychopy import useVersion
-useVersion('2025.1.1')
+#useVersion('2025.1.1')
 
 import psychopy
 print(f"Running PsychoPy {psychopy.__version__}")
@@ -96,16 +96,18 @@ date = date.strftime("%Y-%m-%d")
 
 #---- open a screen and test if refresh rate can be measured
 mon = monitors.Monitor('tempMonitor')  # name can be anything
-mon.setSizePix([1280, 720])  
+mon.setSizePix([1920, 1080])  
 
 win = visual.Window(
-    size=(1280, 720),
+    size=(1920, 1080),
     fullscr=False,
     screen=1,
     units='pix',
     color= 0,
     monitor = mon
 )
+
+win.mouseVisible = False
 
 refresh_rate = win.getActualFrameRate(
     nIdentical=20, nMaxFrames=200, nWarmUpFrames=10, threshold=1
@@ -116,7 +118,8 @@ if refresh_rate:
 else:
     print("Could not measure refresh rate.")
     
-message = visual.TextStim(win, text='Starte Experiment ...')
+message = visual.TextStim(win, text='Starte Experiment ...', wrapWidth=2000)
+message.height = 100
 message.draw()
 win.flip()
 
@@ -140,17 +143,11 @@ offset_iti_list_getsecs = [] # based on getsecs
 
 ITI_list = [] # theoretical ITIs
 
-rts_getsecs = [] # RT based on ptb.getSecs()
-
 tau = []
 
 frequency = [] # tone frequency in Hz
 lim_std = []
 lim_dev = []
-
-keys_pressed = [] # pressed key
-performance = [] # correct?
-confidence = [] # confidence ratings
 
 rule = [] # rule
 dpos = [] # deviant positions
@@ -169,14 +166,16 @@ trigger_kb.waitKeys(maxWait=1)
 response_kb = keyboard.Keyboard(backend = 'ptb') # response kb
 response_kb.waitKeys(maxWait=1)  
 
+slider_kb = keyboard.Keyboard(backend = 'ptb') # response kb
+slider_kb.waitKeys(maxWait=1)  
+
 # create slider + text for confidence ratings
 slider = visual.Slider(
     win=win,
     pos=(0, 0),
-    size=(800, 50),
-    labels=["0", "25", "50", "75", "100"],
+    size=(1600, 100),
+    labels=["1\nsehr\nunsicher", "2", "3", "4", "5\nsehr\nsicher"],
     ticks=[0, 25, 50, 75, 100], 
-    granularity=1,
     style='rating',
     color='DarkSlateBlue',
     markerColor='Red'
@@ -247,13 +246,20 @@ isi_dur = 0.65 # inter-stimulus-interval
 
 response_window = 1.5 # --> too short? --> TODO pilot
 trial_duration = (8*stim_dur) + (7*isi_dur) # trial duration
-key_pos = ['v','y','u','i','l'] # response keys
-feedback_duration = 1 # feedback duration
+#key_pos = ['v','y','u','i','l'] # response keys
+key_pos = ['v','z','u','i','l']
+feedback_duration = 2 # feedback duration
 
 #---- read in the pre-created trial lists
 trials = pd.read_csv(f'{trial_list_dir}sub-{participant}/sub-{participant}_ses-{session}_trials.csv')
 trials['dpos'] = trials['dpos'].fillna(0).astype(int)
 n_trials = len(trials)/8
+
+rts_getsecs = [None]*int(n_trials) # RT based on ptb.getSecs()
+rts_slider_getsecs = [None]*int(n_trials) # RT for confidence slider based on ptb.getSecs()
+keys_pressed = [None]*int(n_trials) # pressed key
+performance = [None]*int(n_trials) # correct?
+confidence = [None]*int(n_trials) # confidence ratings
 
 #---- more important variables
 run_step = len(trials) // 4
@@ -269,7 +275,8 @@ pahandle = PsychPortAudio('Open', [], 1, 4, sample_rate, 1) # for mac mini Jasmi
 #---- load experiment: create all trials in advance from previously generated trial_list
 for i in range(0, len(trials), 8):
     
-    message = visual.TextStim(win, text='Lade Stimuli ...')
+    message = visual.TextStim(win, text='Lade Stimuli ...', wrapWidth=2000)
+    message.height = 100
     message.draw()
     win.flip()
     
@@ -336,7 +343,8 @@ for i in range(0, len(trials), 8):
     buffer_handles.append(buffer_handle)
 
 #---- wait for space press to start
-message = visual.TextStim(win, text='Drücke die Leertaste, um zu starten.')
+message = visual.TextStim(win, text='Drücke die Leertaste, um zu starten.', wrapWidth=2000)
+message.height = 100
 message.draw()
 win.flip()
 
@@ -348,22 +356,22 @@ for t in range(n_triggers_to_wait): # start on the first space press for behavio
     trigger_keys = trigger_kb.waitKeys(keyList=trigger_list, waitRelease=False)
   
 #---- show fixation cross
-message.text = '+'
-message.height = 30
+message.text = ' '
+message.height = 100
 message.pos = (0, 0)
 message.draw()
 win.flip()
 
-question = visual.TextStim(win, text='Wie sicher bist du dir?')
-question.height = 30
-question.pos = (0, 100)
+question = visual.TextStim(win, text='Wie sicher bist du dir?', wrapWidth=2000)
+question.height = 100
+question.pos = (0, 250)
 
-prompt = visual.TextStim(win, text='bitte jetzt antworten')
-prompt.height = 30
+prompt = visual.TextStim(win, text='bitte jetzt antworten', wrapWidth=2000)
+prompt.height = 100
 prompt.pos = (0, 0)
 
 feed = visual.TextStim(win, text='')
-feed.height = 30
+feed.height = 100
 feed.pos = (0, 0)
 feed.pos = (0, 0)
 
@@ -409,6 +417,7 @@ for i in range(0, int(n_trials) + 1):
             'offset_iti_getsecs': np.repeat(offset_iti_list_getsecs[trial_run_slow[0]:trial_run_slow[1]],8), # based on getsecs()
             'ITI': np.repeat(ITI_list,8)[trial_run[0]:trial_run[1]], # theoretical ITI
             'rt_getsecs': np.repeat(rts_getsecs[trial_run_slow[0]:trial_run_slow[1]],8), # response time based on getsecs
+            'rt_slider_getsecs': np.repeat(rts_slider_getsecs[trial_run_slow[0]:trial_run_slow[1]],8), # response time for slider based on getsecs
             'tau_std': np.repeat(tau,8)[trial_run[0]:trial_run[1]], # tau std
             'frequency': frequency[trial_run[0]:trial_run[1]], # sound frequency (base)
             'lim_std': np.repeat(lim_std,8)[trial_run[0]:trial_run[1]], # mu std
@@ -438,14 +447,21 @@ for i in range(0, int(n_trials) + 1):
     
     phase ='stimulus'
     key_pressed = False
+    slider_key_pressed = False
     feedback_first_frame = False
     feedback_recorded = False
     slider_rating = None
     slider_start = None
+    feedback_start = None
+    response_start = None
+    key_name = None
+    key_rt = None
+    slider_rt = None
     slider_end = None
-    slider_time = 0
+    slider_time = None
     max_slider_time = 2 # max time for slider presentation = 2 seconds
     slider.reset()
+
     #response_kb = keyboard.Keyboard(backend = 'ptb')
 
     # play audio sequences from buffer
@@ -453,6 +469,9 @@ for i in range(0, int(n_trials) + 1):
     PsychPortAudio('AddToSchedule', pahandle, buffer_handles[i])
     onset = PsychPortAudio('Start', pahandle, 1, 0, 1) # measure onset trial based on PsychPortAudio
     
+    response_kb.clearEvents()  # clear any leftover keys
+    slider_kb.clearEvents()  # clear any leftover keys
+
     while True:
         
         elapsed = ptb.GetSecs() 
@@ -493,74 +512,115 @@ for i in range(0, int(n_trials) + 1):
                         phase = 'slider'
                         slider_start = ptb.GetSecs()
 
-
+            '''
             elif phase == 'slider':
 
-                if slider.getRating() is not None:
-                    slider_rating = slider.getRating()
-                    slider_end = ptb.GetSecs()
-                    slider_time = slider_end - slider_start
-                    confidence.append(slider_rating)
-                    phase = 'feedback'
-                    feedback_start = ptb.GetSecs()
-                    feedback_first_frame = True
-            
-                elif ptb.GetSecs() - slider_start > max_slider_time and slider_rating is None:
-                    confidence.append(None)
-                    phase = 'feedback'
-                    feedback_start = ptb.GetSecs()
-                    feedback_first_frame = True
+                slider_time = ptb.GetSecs() - slider_start
+                key_map = ['v', 'z', 'u', 'i', 'l']
 
+                if slider_time <= max_slider_time: # use < to prevent edge cases
+
+                    slider_keys = slider_kb.getKeys(key_pos, waitRelease=False)
+
+                    if not slider_key_pressed:
+                        
+                        slider_key_pressed = True
+                        slider_rating = key_map.index(slider_keys[0].name) + 1
+                        slider_rt = ptb.GetSecs() - slider_start
+                        #slider.markerPos = slider_rating
+                        slider_end = ptb.GetSecs()
+                        slider_time_final = slider_end - slider_start
+                        confidence[i] = slider_rating
+                        phase = 'feedback'
+                        # win.callOnFlip(lambda: globals().update({'feedback_start': ptb.GetSecs()}))
+                        #core.wait(0.02)
+                        feedback_start = ptb.GetSecs()
+        
+                elif slider_time > max_slider_time:
+
+                    if not slider_key_pressed:
+                        slider_end = ptb.GetSecs()
+                        slider_time_final = slider_end - slider_start
+                        confidence[i] = None
+                        phase = 'feedback'
+                        #win.callOnFlip(lambda: globals().update({'feedback_start': ptb.GetSecs()}))
+                        #core.wait(0.02)
+                        feedback_start = ptb.GetSecs()
+            '''
+
+            elif phase == 'slider':
+            
+                slider_time = ptb.GetSecs() - slider_start
+                slider_keys = slider_kb.getKeys(key_pos, waitRelease=False)
+                key_map = ['v', 'z', 'u', 'i', 'l']
+
+                # Trigger feedback if a key is pressed OR slider timed out
+                if not slider_key_pressed and (slider_keys or slider_time >= max_slider_time):
+
+                    if slider_keys:
+                        # First response only
+                        slider_key_pressed = True
+                        slider_rating = key_map.index(slider_keys[0].name) + 1
+                        confidence[i] = slider_rating
+                        slider_rt = ptb.GetSecs() - slider_start
+                    else:
+                        # Timeout case, no key pressed
+                        confidence[i] = None
+
+                    # Finalize slider timing
+                    slider_end = ptb.GetSecs()
+                    slider_time_final = slider_end - slider_start
+
+                    # Switch to feedback immediately
+                    phase = 'feedback'
+                    feedback_start = ptb.GetSecs()  # assign immediately
+
+            
             elif phase == 'feedback':
 
-                if feedback_first_frame:
-
-                    if not feedback_recorded:
-                    
-                        if dpos[i] != 0 and key_pressed:
-                            correct_key = dpos[i] - 2
-                            key_posy = key_pos.index(key_name)
-                            
-                            if correct_key == key_posy:
-                                performance.append(1)
-                                feed.color = (0, 1, 0)
-                                feed.text = "richtig"
-                                feedback_recorded = True
-                                
-                            else:
-                                performance.append(0)
-                                feed.color = (1, 0, 0)
-                                feed.text = "falsch"
-                                feedback_recorded = True
+                if not feedback_recorded:
+                
+                    if dpos[i] != 0 and key_pressed:
+                        correct_key = dpos[i] - 2
+                        key_posy = key_pos.index(key_name)
                         
-                        elif dpos[i] == 0 and not key_pressed:
-                            performance.append(4)
+                        if correct_key == key_posy:
+                            performance[i] = 1
                             feed.color = (0, 1, 0)
                             feed.text = "richtig"
                             feedback_recorded = True
                             
-                        elif dpos[i] != 0 and not key_pressed:
-                            performance.append(3)
+                        else:
+                            performance[i] = 0
                             feed.color = (1, 0, 0)
                             feed.text = "falsch"
                             feedback_recorded = True
-
-                    feedback_first_frame = False        
+                    
+                    elif dpos[i] == 0 and not key_pressed:
+                        performance[i] = 4
+                        feed.color = (0, 1, 0)
+                        feed.text = "richtig"
+                        feedback_recorded = True
+                        
+                    elif dpos[i] != 0 and not key_pressed:
+                        performance[i] = 3
+                        feed.color = (1, 0, 0)
+                        feed.text = "falsch"
+                        feedback_recorded = True        
 
                 if ptb.GetSecs() - feedback_start <= feedback_duration:
                     feed.color = feed.color
                 else:
-                    feedback = False
                     feed.color = (1,1,1)
                     feed.text = '+'
                     feed.pos = (0, 0)
                     feedback_recorded = True  
 
             # safety against losing feedback in frame drop or small timing variance on slider
-            if phase != 'feedback' and slider_time >= max_slider_time:
+            if phase != 'feedback' and slider_time is not None and slider_time > max_slider_time:
                 phase = 'feedback'
                 feedback_start = ptb.GetSecs()
-                feedback_first_frame = True
+                #win.callOnFlip(lambda: globals().update({'feedback_start': ptb.GetSecs()}))
                         
             if phase == 'stimulus':
                 message.draw()
@@ -599,13 +659,16 @@ for i in range(0, int(n_trials) + 1):
     offset_iti_list.append(onset + trial_duration + ITI_list[i]) # theoretical based on measured onset + known durations
     
     if key_pressed == True:
-        keys_pressed.append(key_name)
-        rts_getsecs.append(key_rt)
+        keys_pressed[i] = key_name
+        rts_getsecs[i] = key_rt
     else:
-        keys_pressed.append(None)
-        rts_getsecs.append(np.nan)
-        confidence.append(np.nan)
-    
+        keys_pressed[i] = None
+        rts_getsecs[i] = None  
+
+    if slider_key_pressed == True:
+        rts_slider_getsecs[i] = slider_rt
+    else:
+        rts_slider_getsecs[i] = None   
 
 #---- display overall performance and wait for end (5 s wait, then space press ends the experiment)
 accuracy = ((len(np.where(np.array(performance) == 1)[0]) + len(np.where(np.array(performance) == 4)[0]))/len(performance))*100
