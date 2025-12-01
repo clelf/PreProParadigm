@@ -512,42 +512,6 @@ for i in range(0, int(n_trials) + 1):
                         phase = 'slider'
                         slider_start = ptb.GetSecs()
 
-            '''
-            elif phase == 'slider':
-
-                slider_time = ptb.GetSecs() - slider_start
-                key_map = ['v', 'z', 'u', 'i', 'l']
-
-                if slider_time <= max_slider_time: # use < to prevent edge cases
-
-                    slider_keys = slider_kb.getKeys(key_pos, waitRelease=False)
-
-                    if not slider_key_pressed:
-                        
-                        slider_key_pressed = True
-                        slider_rating = key_map.index(slider_keys[0].name) + 1
-                        slider_rt = ptb.GetSecs() - slider_start
-                        #slider.markerPos = slider_rating
-                        slider_end = ptb.GetSecs()
-                        slider_time_final = slider_end - slider_start
-                        confidence[i] = slider_rating
-                        phase = 'feedback'
-                        # win.callOnFlip(lambda: globals().update({'feedback_start': ptb.GetSecs()}))
-                        #core.wait(0.02)
-                        feedback_start = ptb.GetSecs()
-        
-                elif slider_time > max_slider_time:
-
-                    if not slider_key_pressed:
-                        slider_end = ptb.GetSecs()
-                        slider_time_final = slider_end - slider_start
-                        confidence[i] = None
-                        phase = 'feedback'
-                        #win.callOnFlip(lambda: globals().update({'feedback_start': ptb.GetSecs()}))
-                        #core.wait(0.02)
-                        feedback_start = ptb.GetSecs()
-            '''
-
             elif phase == 'slider':
             
                 slider_time = ptb.GetSecs() - slider_start
@@ -611,10 +575,14 @@ for i in range(0, int(n_trials) + 1):
                 if ptb.GetSecs() - feedback_start <= feedback_duration:
                     feed.color = feed.color
                 else:
-                    feed.color = (1,1,1)
-                    feed.text = '+'
-                    feed.pos = (0, 0)
-                    feedback_recorded = True  
+                    phase = 'ITI' 
+
+            elif phase == 'ITI':
+                
+                onset_iti = ptb.GetSecs()
+                message.color = (1, 1, 1)
+                message.text = '+'
+                message.pos = (0, 0)        
 
             # safety against losing feedback in frame drop or small timing variance on slider
             if phase != 'feedback' and slider_time is not None and slider_time > max_slider_time:
@@ -623,6 +591,8 @@ for i in range(0, int(n_trials) + 1):
                 #win.callOnFlip(lambda: globals().update({'feedback_start': ptb.GetSecs()}))
                         
             if phase == 'stimulus':
+                message.draw()
+            elif phase == 'ITI':
                 message.draw()
             elif phase == 'feedback':
                 feed.draw()    
@@ -636,11 +606,11 @@ for i in range(0, int(n_trials) + 1):
                     
         elif elapsed - onset > (len_waveform[i] / sample_rate):
             offset_iti = ptb.GetSecs()
-            message.color = (1, 1, 1)
-            message.text = '+'
-            message.pos = (0, 0)
-            message.draw()
-            win.flip()
+            #message.color = (1, 1, 1)
+            #message.text = '+'
+            #message.pos = (0, 0)
+            #message.draw()
+            #win.flip()
             break
     
     # record come timing variables --> finalize
