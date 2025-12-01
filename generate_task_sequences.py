@@ -570,7 +570,7 @@ class trials_master:
             self.plot_observations(s, obs_hz, run_contexts, run_rules, tau_std, run_dpos)   
 
             # save session output file to read in for experiment in psychopy
-            iti_range = 5# np.arange(7, 12, 0.5) # ITI range (change for fMRI)
+            iti_range = 6# np.arange(7, 12, 0.5) # ITI range (change for fMRI)
             ITI =[]
 
             for i in range(0,len(run_dpos)):
@@ -621,23 +621,8 @@ if __name__ == "__main__":
     
     task = trials_master() 
 
-    cnt = -1
-
-    for d in [0.5,1,2]:
-        for si_stat in [0.05, 0.1, 0.5]:
-            for si_r_rat in [0.5, 1]:
-
-                print(f"=== Generating Trials with d = {d}, si_stat = {si_stat}, si_r = {si_stat*si_r_rat}  ===")
-                
-                cnt+= 1
-                task.config_H["participant_nr"] = f"d{d}-si_stat{si_stat}-si_r{si_stat*si_r_rat}"
-                task.config_H["fix_d_val"] = d
-                task.config_H["si_stat"] = si_stat
-                task.config_H["si_r"] = si_stat*si_r_rat
-                task.config_H["n_sessions"] = 1
-
-                start = time.time()
-                print("=== Generating Trials ===")
-                task.generate_sessions() 
-                end = time.time()
-                print(f"=== Total Run Time Script: {(end-start)/60} ===")
+    start = time.time()
+    print("=== Generating Trials ===")
+    task.generate_sessions() 
+    end = time.time()
+    print(f"=== Total Run Time Script: {(end-start)/60} ===")
