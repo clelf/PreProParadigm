@@ -163,12 +163,12 @@ class trials_master:
 
         plt.xlabel('')
         plt.ylabel('P')
-        plt.title(f"Probabilities ({type} {num})")
+        plt.title(f"Probabilities (training)")
 
         plt.grid(axis='y', linestyle='--', alpha=0.7)
         plt.yticks(np.arange(0, 0.47, 0.01))
         plt.tight_layout()
-        plt.savefig(f"trial_lists_training/sub-{self.config_H['participant_nr']}/plots/probs_{type}_{num}.png", dpi=300, bbox_inches='tight')
+        plt.savefig(f"trial_lists_training/sub-{self.config_H['participant_nr']}/plots/probs_{type}.png", dpi=300, bbox_inches='tight')
         #plt.show()
         plt.close()
 
@@ -365,12 +365,12 @@ class trials_master:
 
         ax.set_xlabel('tone')
         ax.set_ylabel('state value')
-        ax.set_title(f"linear gaussian dynamics for states of standard and deviant across tones (session {s+1})")
+        ax.set_title(f"linear gaussian dynamics for states of standard and deviant across tones (session training)")
         ax.legend()
         handles, labels = ax.get_legend_handles_labels()
         ax.legend(handles=tau_legend_patches + handles, loc='upper right')
         plt.tight_layout()
-        plt.savefig(f"trial_lists_training/sub-{self.config_H['participant_nr']}/plots/lgd_std_dev_session_{s+1}.png", dpi=300, bbox_inches='tight')
+        plt.savefig(f"trial_lists_training/sub-{self.config_H['participant_nr']}/plots/lgd_std_dev_session_training.png", dpi=300, bbox_inches='tight')
         #plt.show()
         plt.close()
 
@@ -421,7 +421,7 @@ class trials_master:
 
         ax.set_xlabel('tone')
         ax.set_ylabel('observation in Hz (erb scale)')
-        ax.set_title(f"sound observations (session {s+1})")
+        ax.set_title(f"sound observations (session training)")
         ax.legend()
 
         handles, labels = ax.get_legend_handles_labels()
@@ -435,7 +435,7 @@ class trials_master:
             plt.text(indices_dev[i], ymax-20, f'{int(dpos_seq_no_zero[i])}', fontsize=6, ha='center', va='bottom')
 
         plt.tight_layout()
-        plt.savefig(f"trial_lists_training/sub-{self.config_H["participant_nr"]}/plots/observations_std_dev_session_{s+1}.png", dpi=300, bbox_inches='tight')
+        plt.savefig(f"trial_lists_training/sub-{self.config_H["participant_nr"]}/plots/observations_std_dev_session_training.png", dpi=300, bbox_inches='tight')
         #plt.show()
         plt.close()
 
@@ -533,7 +533,7 @@ class trials_master:
                             mu_tones[s][r][1] = pars[1][1]
 
                 # plot probabilities per run
-                self.plot_probabilities(rules, dpos, r+1, f'session_{s+1}_run')
+                #self.plot_probabilities(rules, dpos, r+1, f'session_{s+1}_run')
                 
                 # collect data across runs
                 run_rules.append(rules)
@@ -553,7 +553,7 @@ class trials_master:
             run_states_dev = np.concatenate(run_states_dev)
             run_obs = np.concatenate(run_obs) 
 
-            self.plot_probabilities(run_rules, run_dpos, s+1, 'overall_session')
+            self.plot_probabilities(run_rules, run_dpos, s+1, 'overall_training')
 
             # generate some variables for output file
             tau_std_seq = [[tau_std[s][0]]*self.config_H["N_blocks"]*self.config_H["N_tones"]] #for x in range(len(tau_std[s]))]
@@ -622,7 +622,7 @@ class trials_master:
             trials_final['run_n'] = np.repeat([range(0,1)], self.config_H["N_blocks"]*self.config_H["N_tones"])
             trials_final['session_n'] = [s]*self.config_H["N_blocks"]*self.config_H["N_tones"]#*len(tau_std[s])
 
-            trials_final.to_csv(f'trial_lists_training/sub-{self.config_H['participant_nr']}/sub-{self.config_H['participant_nr']}_ses-{session_nr}_trials.csv', index=False, float_format="%.4f")
+            trials_final.to_csv(f'trial_lists_training/sub-{self.config_H['participant_nr']}/sub-{self.config_H['participant_nr']}_ses-training_trials.csv', index=False, float_format="%.4f")
 
             session_duration = ((((self.config_H["N_tones"]-1)*self.config_H["isi"])+(self.config_H["N_tones"]*self.config_H["duration_tones"]))*self.config_H["N_blocks"]) + sum(trials_final['ITI'][::8])
             print(f'Estimated session duration in minutes: {session_duration/60}')
