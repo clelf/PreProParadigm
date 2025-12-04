@@ -25,7 +25,7 @@ class trials_master:
 
         self.config_H = {
 
-            "participant_nr": 'test_participant', # participant nr, as also read in by PsychPy exp.
+            "participant_nr": '', # participant nr, as also read in by PsychPy exp.
             "N_samples": 1,
             "N_blocks": 60, # number of trials
             "N_tones": 8, # number of tones in each trial
@@ -631,24 +631,18 @@ class trials_master:
             
 if __name__ == "__main__":
     
-    task = trials_master() 
-    start = time.time()
-    print("=== Generating Trials ===")
-    task.generate_sessions() 
-    end = time.time()
-    print(f"=== Total Run Time Script: {(end-start)/60} ===")
-
-    '''
     cnt = -1
 
-    for d in [2]:#[0.5,1,2]:
-        for si_stat in [0.05]: #, 0.1, 0.5]:
-            for si_r_rat in [0.5]:#[0.1, 1]:
+    for d in [1, 2]:
+        for si_stat in [0.1, 0.05]: 
+            for si_r_rat in [0.1]:
 
                 print(f"=== Generating Trials with d = {d}, si_stat = {si_stat}, si_r = {si_stat*si_r_rat}  ===")
                 
                 cnt+= 1
-                task.config_H["participant_nr"] = f"d{d}-si_stat{si_stat}-si_r{si_stat*si_r_rat}"
+
+                task = trials_master()
+                task.config_H["participant_nr"] = f"d{d}-si_stat{si_stat}-si_r{round(si_stat*si_r_rat, 2)}"
                 task.config_H["fix_d_val"] = d
                 task.config_H["si_stat"] = si_stat
                 task.config_H["si_r"] = si_stat*si_r_rat
@@ -659,4 +653,4 @@ if __name__ == "__main__":
                 task.generate_sessions() 
                 end = time.time()
                 print(f"=== Total Run Time Script: {(end-start)/60} ===")
-    '''            
+           

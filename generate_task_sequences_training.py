@@ -47,9 +47,9 @@ class trials_master:
             "fixed_rule_p": 0.1,
             "rules_cmap": {0: "tab:blue", 1: "tab:red", 2: "tab:gray"},
             "fix_process": True, # fix tau, lim, d to input values
-            "fix_tau_val": [16, 2], # tau std, tau dev
+            "fix_tau_val": [40, 5], # tau std, tau dev
             "fix_lim_val": -0.6, # lim std
-            "fix_d_val": 4, # effect size d
+            "fix_d_val": 3, # effect size d
             "fix_pi": True,
             "fix_pi_vals": [0.8, 0.1, 0], # fixed values to create transition matrix
             "n_sessions": 1, # number of sessions
@@ -88,7 +88,7 @@ class trials_master:
         NOTE: only roughly balanced for 6 sessions, might need change'''
         
         mu_tones = [[-0.6, None], [-0.6, None]]
-        taus = [16, 40, 160, 240]
+        taus = [40, 40, 40, 40]
         mu_tones_all = []
 
         for rep in range(self.config_H["n_sessions"]):

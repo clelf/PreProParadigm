@@ -253,7 +253,7 @@ isi_dur = 0.65 # inter-stimulus-interval
 response_window = 1.5 # --> too short? --> TODO pilot
 trial_duration = (8*stim_dur) + (7*isi_dur) # trial duration
 key_pos = ['v','y','u','i','l'] # response keys
-#key_pos = ['v','z','u','i','l']
+key_pos_slider = ['1','2','3','4','5']
 feedback_duration = 2 # feedback duration
 
 #---- read in the pre-created trial lists
@@ -602,8 +602,8 @@ for i in range(0, int(n_trials) + 1):
             elif phase == 'slider':
             
                 slider_time = ptb.GetSecs() - slider_start
-                slider_keys = slider_kb.getKeys(key_pos, waitRelease=False)
-                key_map = ['v', 'y', 'u', 'i', 'l']
+                slider_keys = slider_kb.getKeys(key_pos_slider, waitRelease=False)
+                key_map = ['1', '2', '3', '4', '5']
 
                 if not slider_key_pressed and (slider_keys or slider_time > max_slider_time):
 
