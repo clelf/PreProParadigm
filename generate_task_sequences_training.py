@@ -1,5 +1,5 @@
 # ---- imports ---- #
-import audit_gm as gm
+import audit_gm_training as gm
 
 import numpy as np
 from numpy import ma
@@ -25,7 +25,7 @@ class trials_master:
 
         self.config_H = {
 
-            "participant_nr": '', # participant nr, as also read in by PsychPy exp.
+            "participant_nr": 'test_participant', # participant nr, as also read in by PsychPy exp.
             "N_samples": 1,
             "N_blocks": 60, # number of trials
             "N_tones": 8, # number of tones in each trial
@@ -39,7 +39,7 @@ class trials_master:
             "si_rho_timbres": 0.05, # unused for experiment
             # "si_q": 2,  # process noise variance
             "si_stat": 0.05,  # stationary process variance
-            "si_r": 0.02,  # measurement noise variance
+            "si_r": 0.01,  # measurement noise variance
             "si_d_coef": 0.05, # unused for experiment
             "mu_d": 2, # unused for experiment
             "return_pi_rules": True,
@@ -47,13 +47,13 @@ class trials_master:
             "fixed_rule_p": 0.1,
             "rules_cmap": {0: "tab:blue", 1: "tab:red", 2: "tab:gray"},
             "fix_process": True, # fix tau, lim, d to input values
-            "fix_tau_val": [16, 2], # tau std, tau dev
+            "fix_tau_val": [40, 5], # tau std, tau dev
             "fix_lim_val": -0.6, # lim std
-            "fix_d_val": 1, # effect size d
+            "fix_d_val": 3, # effect size d
             "fix_pi": True,
             "fix_pi_vals": [0.8, 0.1, 0], # fixed values to create transition matrix
-            "n_sessions": 6, # number of sessions
-            "n_runs": 4, # number of runs per session
+            "n_sessions": 1, # number of sessions
+            "n_runs": 1, # number of runs per session
             "isi": 0.65, # inter-stimulus interval
             "duration_tones": 0.1, # stimulus duration
         }
@@ -61,12 +61,12 @@ class trials_master:
     def prep_dirs(self):
         '''create necessary output directories'''
 
-        os.makedirs('trial_lists/', exist_ok=True)
+        os.makedirs('trial_lists_training/', exist_ok=True)
 
-        sub_dir = f"trial_lists/sub-{self.config_H["participant_nr"]}"
+        sub_dir = f"trial_lists_training/sub-{self.config_H["participant_nr"]}"
         os.makedirs(sub_dir, exist_ok=True)
 
-        plot_dir = f"trial_lists/sub-{self.config_H["participant_nr"]}/plots"
+        plot_dir = f"trial_lists_training/sub-{self.config_H["participant_nr"]}/plots"
         os.makedirs(plot_dir, exist_ok=True)
 
     def compute_stationary(self, pi):
@@ -87,8 +87,8 @@ class trials_master:
         '''create a manually predefined order of mus and taus,
         NOTE: only roughly balanced for 6 sessions, might need change'''
         
-        mu_tones = [[-0.6, None], [0.3, None]]
-        taus = [16, 40, 160, 240]
+        mu_tones = [[-0.6, None], [-0.6, None]]
+        taus = [40, 40, 40, 40]
         mu_tones_all = []
 
         for rep in range(self.config_H["n_sessions"]):
@@ -104,7 +104,7 @@ class trials_master:
             mu_tones_all.append(row)
                 
         mu_tones_all = np.array(mu_tones_all)
-        tau_std_ind = np.array([[0, 1, 2, 3],
+        tau_std_ind = np.array([[0, 0, 0, 0],
                                 [3, 2, 1, 0],
                                 [1, 3, 0, 2],
                                 [3, 1, 2, 0],
@@ -119,7 +119,7 @@ class trials_master:
                 tau_std[rep]=tau_row
 
         tau_std = np.array(tau_std)
-        perm = np.random.permutation(len(mu_tones_all)) # shuffle sessions
+        # perm = np.random.permutation(len(mu_tones_all)) # shuffle sessions
         perm = np.array(range(self.config_H["n_sessions"])) # for test reasons keep order
         
         mu_tones_all = mu_tones_all[perm].tolist()
@@ -163,12 +163,12 @@ class trials_master:
 
         plt.xlabel('')
         plt.ylabel('P')
-        plt.title(f"Probabilities ({type} {num})")
+        plt.title(f"Probabilities (training)")
 
         plt.grid(axis='y', linestyle='--', alpha=0.7)
         plt.yticks(np.arange(0, 0.47, 0.01))
         plt.tight_layout()
-        plt.savefig(f"trial_lists/sub-{self.config_H['participant_nr']}/plots/probs_{type}_{num}.png", dpi=300, bbox_inches='tight')
+        plt.savefig(f"trial_lists_training/sub-{self.config_H['participant_nr']}/plots/probs_{type}.png", dpi=300, bbox_inches='tight')
         #plt.show()
         plt.close()
 
@@ -275,7 +275,7 @@ class trials_master:
         figy.set_size_inches(25, 12) 
         
         plt.tight_layout()
-        plt.savefig(f"trial_lists/sub-{self.config_H["participant_nr"]}/plots/kalman_results.png", dpi=300, bbox_inches='tight')
+        plt.savefig(f"trial_lists_training/sub-{self.config_H["participant_nr"]}/plots/kalman_results.png", dpi=300, bbox_inches='tight')
         #plt.show() 
         plt.close()  
 
@@ -365,19 +365,19 @@ class trials_master:
 
         ax.set_xlabel('tone')
         ax.set_ylabel('state value')
-        ax.set_title(f"linear gaussian dynamics for states of standard and deviant across tones (session {s+1})")
+        ax.set_title(f"linear gaussian dynamics for states of standard and deviant across tones (session training)")
         ax.legend()
         handles, labels = ax.get_legend_handles_labels()
         ax.legend(handles=tau_legend_patches + handles, loc='upper right')
         plt.tight_layout()
-        plt.savefig(f"trial_lists/sub-{self.config_H['participant_nr']}/plots/lgd_std_dev_session_{s+1}.png", dpi=300, bbox_inches='tight')
+        plt.savefig(f"trial_lists_training/sub-{self.config_H['participant_nr']}/plots/lgd_std_dev_session_training.png", dpi=300, bbox_inches='tight')
         #plt.show()
         plt.close()
 
     def plot_observations(self, s, obs_hz, run_contexts, run_rules, tau_std, dpos):
         '''plot observations in Hz'''
 
-        tau_std_seq = [[tau_std[s][x]]*self.config_H["N_blocks"]*self.config_H["N_tones"] for x in range(len(tau_std[s]))]
+        tau_std_seq = [[tau_std[s][0]]*self.config_H["N_blocks"]*self.config_H["N_tones"]] # for x in range(len(tau_std[s]))]
         tau_std_seq = np.concatenate(tau_std_seq)
         
         indices_dev = np.where(run_contexts == 1)
@@ -421,7 +421,7 @@ class trials_master:
 
         ax.set_xlabel('tone')
         ax.set_ylabel('observation in Hz (erb scale)')
-        ax.set_title(f"sound observations (session {s+1})")
+        ax.set_title(f"sound observations (session training)")
         ax.legend()
 
         handles, labels = ax.get_legend_handles_labels()
@@ -435,7 +435,7 @@ class trials_master:
             plt.text(indices_dev[i], ymax-20, f'{int(dpos_seq_no_zero[i])}', fontsize=6, ha='center', va='bottom')
 
         plt.tight_layout()
-        plt.savefig(f"trial_lists/sub-{self.config_H["participant_nr"]}/plots/observations_std_dev_session_{s+1}.png", dpi=300, bbox_inches='tight')
+        plt.savefig(f"trial_lists_training/sub-{self.config_H["participant_nr"]}/plots/observations_std_dev_session_training.png", dpi=300, bbox_inches='tight')
         #plt.show()
         plt.close()
 
@@ -473,7 +473,8 @@ class trials_master:
                     
                     # use Cléms implementation to generate data per run
                     hgm = gm.HierarchicalAuditGM(self.config_H)
-                    rules, _, dpos, _, _, contexts, states, obs, pars, pi_rules = hgm.generate_run(return_pars=True, return_pi_rules=self.config_H["return_pi_rules"])
+                    rules, _, dpos, _, _, contexts, states, obs, pars, pi_rules, obs_noise_lvls = hgm.generate_run(return_pars=True, return_pi_rules=self.config_H["return_pi_rules"])
+                    obs_noise_lvls_long = obs_noise_lvls.flatten()
 
                     # check if rules are balanced
                     p_r1 = sum(rules == 0)/len(rules)
@@ -483,7 +484,7 @@ class trials_master:
 
                     stationary_distrib = self.compute_stationary(pi_rules)
 
-                    if np.any((p_rules < (stationary_distrib[0]-0.02)) | (p_rules > (stationary_distrib[0]+0.02))) or p_r3 < (stationary_distrib[2]-0.02) or p_r3 > (stationary_distrib[2]+0.02): 
+                    if np.any((p_rules < (stationary_distrib[0]-0.05)) | (p_rules > (stationary_distrib[0]+0.05))) or p_r3 < (stationary_distrib[2]-0.05) or p_r3 > (stationary_distrib[2]+0.05): 
                         # allow for deviations of max. 2% in both directions from the stationary
                         continue
                     else:
@@ -507,16 +508,16 @@ class trials_master:
                         max_count = max(all_counts)
                         min_count = min(all_counts)
 
-                        if max_count - min_count > 1: # max. difference of 1 trial between occurrences of deviant positions
+                        if max_count - min_count > 2: # max. difference of 1 trial between occurrences of deviant positions
                             continue
                         else:
                             unbalanced = False
 
                             # plot run using Cléms plotting approach
-                            hgm.plot_combined_with_matrix(states[0], states[1], obs, contexts, rules, dpos, pars, pi_rules=pi_rules, text=False)
-                            fig = plt.gcf() 
-                            fig.savefig(f"trial_lists/sub-{self.config_H['participant_nr']}/plots/lgd_std_dev_session_{s+1}_run{r+1}_plot_clem.png", dpi=300, bbox_inches='tight')
-                            plt.close()                             
+                            #hgm.plot_combined_with_matrix(states[0], states[1], obs, contexts, rules, dpos, pars, pi_rules=pi_rules, text=False)
+                            #fig = plt.gcf() 
+                            #fig.savefig(f"trial_lists_training/sub-{self.config_H['participant_nr']}/plots/lgd_std_dev_session_{s+1}_run{r+1}_plot_clem.png", dpi=300, bbox_inches='tight')
+                            #plt.close()                             
                             
                             si_q_arr.append(pars[3][0])
                             si_q_dev_arr.append(pars[3][1])
@@ -532,7 +533,7 @@ class trials_master:
                             mu_tones[s][r][1] = pars[1][1]
 
                 # plot probabilities per run
-                self.plot_probabilities(rules, dpos, r+1, f'session_{s+1}_run')
+                #self.plot_probabilities(rules, dpos, r+1, f'session_{s+1}_run')
                 
                 # collect data across runs
                 run_rules.append(rules)
@@ -552,26 +553,26 @@ class trials_master:
             run_states_dev = np.concatenate(run_states_dev)
             run_obs = np.concatenate(run_obs) 
 
-            self.plot_probabilities(run_rules, run_dpos, s+1, 'overall_session')
+            self.plot_probabilities(run_rules, run_dpos, s+1, 'overall_training')
 
             # generate some variables for output file
-            tau_std_seq = [[tau_std[s][x]]*self.config_H["N_blocks"]*self.config_H["N_tones"] for x in range(len(tau_std[s]))]
+            tau_std_seq = [[tau_std[s][0]]*self.config_H["N_blocks"]*self.config_H["N_tones"]] #for x in range(len(tau_std[s]))]
             tau_std_seq = np.concatenate(tau_std_seq)
 
-            tau_dev_seq = [[tau_dev[s][x]]*self.config_H["N_blocks"]*self.config_H["N_tones"] for x in range(len(tau_dev[s]))]
+            tau_dev_seq = [[tau_dev[s][0]]*self.config_H["N_blocks"]*self.config_H["N_tones"]] #for x in range(len(tau_dev[s]))]
             tau_dev_seq = np.concatenate(tau_dev_seq)
 
-            lim_std_seq = [[mu_tones[s][x][0]]*self.config_H["N_blocks"]*self.config_H["N_tones"] for x in range(len(mu_tones[s]))]
+            lim_std_seq = [[mu_tones[s][0][0]]*self.config_H["N_blocks"]*self.config_H["N_tones"]] #for x in range(len(mu_tones[s]))]
             lim_std_seq = np.concatenate(lim_std_seq)
 
-            lim_dev_seq = [[mu_tones[s][x][1]]*self.config_H["N_blocks"]*self.config_H["N_tones"] for x in range(len(mu_tones[s]))]
+            lim_dev_seq = [[mu_tones[s][0][1]]*self.config_H["N_blocks"]*self.config_H["N_tones"]] #for x in range(len(mu_tones[s]))]
             lim_dev_seq = np.concatenate(lim_dev_seq)
             
             # plot states for each full session
-            self.plot_states(s, run_states_std, run_states_dev, tau_std, tau_dev, run_rules, si_q_arr, si_q_dev_arr, mu_tones)
+            #self.plot_states(s, run_states_std, run_states_dev, tau_std, tau_dev, run_rules, si_q_arr, si_q_dev_arr, mu_tones)
                 
             # apply Kalman filter to each session
-            self.apply_kalman(s, run_obs, run_contexts, si_q_arr, mu_tones, tau_std, figy, axy)
+            #self.apply_kalman(s, run_obs, run_contexts, si_q_arr, mu_tones, tau_std, figy, axy)
 
             # apply frequency transfer to observations and plot observations in Hz
             obs_hz = []
@@ -611,46 +612,30 @@ class trials_master:
 
             trials_final['sigma_q_std'] = np.repeat([x for x in si_q_arr], self.config_H["N_tones"]*self.config_H["N_blocks"])
             trials_final['sigma_q_dev'] = np.repeat([x for x in si_q_dev_arr], self.config_H["N_tones"]*self.config_H["N_blocks"])
-            trials_final['sigma_r'] = [self.config_H["si_r"]]*self.config_H["N_blocks"]*self.config_H["N_tones"]*len(tau_std[s])
+            trials_final['sigma_r'] = obs_noise_lvls_long
 
             trials_final['ITI'] = [round(item,2) for item in ITI for _ in range(self.config_H["N_tones"])]
 
-            trials_final['duration_tones'] = [self.config_H["duration_tones"]]*self.config_H["N_blocks"]*self.config_H["N_tones"]*len(tau_std[s])
-            trials_final['ISI'] = [self.config_H["isi"]]*self.config_H["N_blocks"]*self.config_H["N_tones"]*len(tau_std[s])
-            trials_final['trial_n'] = [i for i in range(self.config_H["N_blocks"]*len(tau_std[s])) for _ in range(self.config_H["N_tones"])]
-            trials_final['run_n'] = np.repeat([range(0,len(tau_std[s]))], self.config_H["N_blocks"]*self.config_H["N_tones"])
-            trials_final['session_n'] = [s]*self.config_H["N_blocks"]*self.config_H["N_tones"]*len(tau_std[s])
+            trials_final['duration_tones'] = [self.config_H["duration_tones"]]*self.config_H["N_blocks"]*self.config_H["N_tones"]#*len(tau_std[s])
+            trials_final['ISI'] = [self.config_H["isi"]]*self.config_H["N_blocks"]*self.config_H["N_tones"]#*len(tau_std[s])
+            trials_final['trial_n'] = [i for i in range(self.config_H["N_blocks"]) for _ in range(self.config_H["N_tones"])]
+            trials_final['run_n'] = np.repeat([range(0,1)], self.config_H["N_blocks"]*self.config_H["N_tones"])
+            trials_final['session_n'] = [s]*self.config_H["N_blocks"]*self.config_H["N_tones"]#*len(tau_std[s])
 
-            trials_final.to_csv(f'trial_lists/sub-{self.config_H['participant_nr']}/sub-{self.config_H['participant_nr']}_ses-{session_nr}_trials.csv', index=False, float_format="%.4f")
+            trials_final.to_csv(f'trial_lists_training/sub-{self.config_H['participant_nr']}/sub-{self.config_H['participant_nr']}_ses-training_trials.csv', index=False, float_format="%.4f")
 
-            session_duration = ((((self.config_H["N_tones"]-1)*self.config_H["isi"])+(self.config_H["N_tones"]*self.config_H["duration_tones"]))*self.config_H["N_blocks"]*(len(tau_std[s]))) + sum(trials_final['ITI'][::8])
+            session_duration = ((((self.config_H["N_tones"]-1)*self.config_H["isi"])+(self.config_H["N_tones"]*self.config_H["duration_tones"]))*self.config_H["N_blocks"]) + sum(trials_final['ITI'][::8])
             print(f'Estimated session duration in minutes: {session_duration/60}')
 
         # plot Kalman results across all sessions
-        self.plot_kalman(figy, axy, n_kalman = [8, 16, 24, 32, 40, 48, 56])        
+        # self.plot_kalman(figy, axy, n_kalman = [8, 16, 24, 32, 40, 48, 56])        
             
 if __name__ == "__main__":
     
-    cnt = -1
+    task = trials_master() 
 
-    for d in [1, 2]:
-        for si_stat in [0.1, 0.05]: 
-            for si_r_rat in [0.1]:
-
-                print(f"=== Generating Trials with d = {d}, si_stat = {si_stat}, si_r = {si_stat*si_r_rat}  ===")
-                
-                cnt+= 1
-
-                task = trials_master()
-                task.config_H["participant_nr"] = f"d{d}-si_stat{si_stat}-si_r{round(si_stat*si_r_rat, 2)}"
-                task.config_H["fix_d_val"] = d
-                task.config_H["si_stat"] = si_stat
-                task.config_H["si_r"] = si_stat*si_r_rat
-                task.config_H["n_sessions"] = 1
-
-                start = time.time()
-                print("=== Generating Trials ===")
-                task.generate_sessions() 
-                end = time.time()
-                print(f"=== Total Run Time Script: {(end-start)/60} ===")
-           
+    start = time.time()
+    print("=== Generating Trials ===")
+    task.generate_sessions() 
+    end = time.time()
+    print(f"=== Total Run Time Script: {(end-start)/60} ===")
