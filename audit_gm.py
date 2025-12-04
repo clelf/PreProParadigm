@@ -22,8 +22,29 @@ except ImportError:
 
 def reshape_batch_variable(var):
     if isinstance(var[0], dict):
-        # Recursively process each dict key
-        return {key: np.stack([batch[key] for batch in var], axis=0) for key in var[0]}
+        # Recursively process each dict key, stacking arrays along a new batch axis
+        result = {}
+        for key in var[0]:
+            elements = [batch[key] for batch in var]
+            # Check if elements are scalars or arrays
+            if np.isscalar(elements[0]):
+                result[key] = np.array(elements)
+            else:
+                result[key] = np.stack(elements, axis=0)
+        return result
+    elif isinstance(var[0], tuple):
+        # Handle tuples (e.g., pars) by stacking each element separately
+        # This handles mixed types (arrays and scalars) within the tuple
+        n_elements = len(var[0])
+        result = []
+        for i in range(n_elements):
+            elements = [batch[i] for batch in var]
+            # Check if elements are scalars or arrays
+            if np.isscalar(elements[0]):
+                result.append(np.array(elements))
+            else:
+                result.append(np.stack(elements, axis=0))
+        return tuple(result)
     else:
         # Direct array
         return np.stack([x for x in var], axis=0)
@@ -58,22 +79,6 @@ class AuditGenerativeModel:
         # Parallel processing: max_cores controls the number of workers
         # Set to 1 to disable parallelization, None to use all available cores
         self.max_cores = params.get("max_cores", None)
-
-        # specify pi manually according to what I did before
-        if "fix_pi" in params.keys():
-            self.fix_pi = params["fix_pi"]
-        if "fix_pi_vals" in params.keys():
-            self.fix_pi_vals = params["fix_pi_vals"]
-
-        # fix taus std/dev, lim, and d
-        if "fix_process" in params.keys():
-            self.fix_process = params["fix_process"]
-            if "fix_lim_val" in params.keys() and "fix_tau_val" in params.keys() and "fix_d_val" in params.keys():
-                self.fix_lim_val = params["fix_lim_val"]
-                self.fix_tau_val = params["fix_tau_val"]
-                self.fix_d_val   = params["fix_d_val"]
-        else:
-            self.fix_process = False
         
         # Dynamics parameters
         if "tones_values" in params.keys():
@@ -93,7 +98,7 @@ class AuditGenerativeModel:
         else: self.N_ctx = params["N_ctx"]
 
         # In case of 2 contexts (std and dvt), define stationary values for both processes
-        if "si_d_coef" in params.keys() and "si_stat" in params.keys() and "mu_d" in params.keys() and "d_bounds" in params.keys():
+        if "si_d_coef" in params.keys() and "mu_d" in params.keys() and "d_bounds" in params.keys():
             self.mu_d = params["mu_d"]
             si_d_ub = (params["d_bounds"]["high"] - self.mu_d)/3     # we want most of d (i.e. 3*si_d) to be <= 4
             si_d_lb = (self.mu_d - params["d_bounds"]["low"])/3   # we want most of d (i.e. 3*si_d) to be >= 0.1
@@ -120,6 +125,15 @@ class AuditGenerativeModel:
                 
         else:
             self.params_testing = False
+        
+        # fix taus std/dev, lim, and d
+        if "fix_process" in params.keys():
+            self.fix_process = params["fix_process"]
+            if "fix_lim_val" in params.keys() and "fix_tau_val" in params.keys():
+                self.fix_lim_val = params["fix_lim_val"]
+                self.fix_tau_val = params["fix_tau_val"]
+        else:
+            self.fix_process = False
 
 
     # Auxiliary samplers from goin.coin.GenerativeModel
@@ -472,7 +486,7 @@ class AuditGenerativeModel:
 
         if not self.fix_process:
             if self.params_testing:
-                tau = np.array([self.mu_tau]) # for compatibility with later, since when self.params_testing, N_ctx can only be 1
+                tau = self.mu_tau * np.ones(self.N_ctx) # for compatibility with later, since when self.params_testing, N_ctx can only be 1
                 si_stat = self.si_stat
             else:
                 # NOTE: for mu_tau=64, si_tau=0.5 the distributions covers well the range of values from 1 to 256
@@ -543,8 +557,14 @@ class AuditGenerativeModel:
                 
 
         if return_pars:
-            # return states, a, d
-            return states, (tau.squeeze(), lim.squeeze(), si_stat, si_q.squeeze()) # states, (tau, mu_lim, si_stat, si_q)
+            # Return parameters as a labeled dictionary for clarity and compatibility
+            pars = {
+                'tau': tau.squeeze(),       # time constant (scalar if N_ctx=1, array if N_ctx>1)
+                'lim': lim.squeeze(),       # stationary value (scalar if N_ctx=1, array if N_ctx>1)
+                'si_stat': si_stat,         # stationary std (scalar)
+                'si_q': si_q.squeeze()      # process noise std (scalar if N_ctx=1, array if N_ctx>1)
+            }
+            return states, pars
         else:
             return states
 
@@ -609,22 +629,22 @@ class AuditGenerativeModel:
         ax2.set_yticks(ticks=[0, 1], labels=["std", "dvt"])
 
         # Plot horizontal lines for lim_std and lim_dvt
-        ax1.hlines(pars[1][0], xmin=0, xmax=len(x_stds)-1, color="blue", linestyle="--", alpha=0.5, label="lim_std")
-        ax1.hlines(pars[1][1], xmin=0, xmax=len(x_dvts)-1, color="red", linestyle="--", alpha=0.5, label="lim_dvt")
+        ax1.hlines(pars['lim'][0], xmin=0, xmax=len(x_stds)-1, color="blue", linestyle="--", alpha=0.5, label="lim_std")
+        ax1.hlines(pars['lim'][1], xmin=0, xmax=len(x_dvts)-1, color="red", linestyle="--", alpha=0.5, label="lim_dvt")
 
         # Fill margin between lim ± si_stat for both processes
         ax1.fill_between(
             range(len(x_stds)),
-            pars[1][0] - pars[2],
-            pars[1][0] + pars[2],
+            pars['lim'][0] - pars['si_stat'],
+            pars['lim'][0] + pars['si_stat'],
             color="blue",
             alpha=0.2,
             label="lim_std ± si_stat"
         )
         ax1.fill_between(
             range(len(x_dvts)),
-            pars[1][1] - pars[2],
-            pars[1][1] + pars[2],
+            pars['lim'][1] - pars['si_stat'],
+            pars['lim'][1] + pars['si_stat'],
             color="red",
             alpha=0.2,
             label="lim_dvt ± si_stat"
@@ -800,8 +820,8 @@ class NonHierachicalAuditGM(AuditGenerativeModel):
         obs = obs.flatten()
 
         if return_pars:
-            # Append self.si_r to the pars element of res (res[-1])
-            pars = (*pars, self.si_r)
+            # Add si_r to the parameters dictionary
+            pars['si_r'] = self.si_r
             return contexts, states, obs, pars
         else:
             return contexts, states, obs
@@ -823,19 +843,25 @@ class HierarchicalAuditGM(AuditGenerativeModel):
         else:
             self.return_pi_rules = False
 
-        # sampling    
+        # Transition matrix between rules
+        # Set transition matrix manually
+        if "fix_pi_rules" in params.keys():
+            self.fix_pi_rules = params["fix_pi_rules"]
+        else:
+            self.fix_pi_rules = False
+        if "fix_pi_vals" in params.keys():
+            self.fix_pi_vals = params["fix_pi_vals"]
 
-        # Define transition matrix stochastically
+        # fix taus std/dev, lim, and d
+        if self.fix_process:
+            self.fix_d_val   = params["fix_d_val"]
+        
+        # Or define transition matrix stochastically
         if "mu_rho_rules" in params.keys():
             self.mu_rho_rules = params["mu_rho_rules"]
         if "si_rho_rules" in params.keys():
             self.si_rho_rules = params["si_rho_rules"]
 
-        # Or set transition matrix manually
-        if "pi_rules" in params.keys():
-            self.pi_rules = params["pi_rules"]
-        else:
-            self.pi_rules = None
 
         # Optionally, set one null rule
         if "fixed_rule_id" in params.keys() and "fixed_rule_p" in params.keys():
@@ -857,8 +883,12 @@ class HierarchicalAuditGM(AuditGenerativeModel):
         # Timbres
         if "mu_rho_timbres" in params.keys():
             self.mu_rho_timbres = params["mu_rho_timbres"]
+        else:
+            self.mu_rho_timbres = 0.8 # Default value for compatibility
         if "si_rho_timbres" in params.keys():
             self.si_rho_timbres = params["si_rho_timbres"]
+        else:
+            self.si_rho_timbres = 0.05 # Default value for compatibility
 
     def sample_rules(
         self, N_blocks, N_rules, mu_rho_rules, si_rho_rules, fixed_rule_id=None, fixed_rule_p=None, return_pi=False
@@ -882,7 +912,7 @@ class HierarchicalAuditGM(AuditGenerativeModel):
         np.array (N_blocks,)
             Sequence of rules associated with blocks for each block of N_blocks blocks
         """
-        if self.fix_pi and self.fix_pi_vals is not None:
+        if self.fix_pi_rules and self.fix_pi_vals is not None:
             # If a pi_rules has been manually specified, use it
             pi_rules = self.compute_fixed_pi(self.fix_pi_vals)
         else:
@@ -1039,8 +1069,8 @@ class HierarchicalAuditGM(AuditGenerativeModel):
         
         # Return parameters
         if return_pars:
-            # Append self.si_r to the pars element of res (res[-1])
-            pars = (*pars, self.si_r)            
+            # Add si_r to the parameters dictionary
+            pars['si_r'] = self.si_r            
             return_elements = (*return_elements, pars)
         
         # Return transition rules
@@ -1143,30 +1173,30 @@ class HierarchicalAuditGM(AuditGenerativeModel):
         else:
             ax1.set_xticks(np.arange(0, self.N_blocks * self.N_tones + 1, 50))
 
-        ax1.hlines(pars[1][0], xmin=0, xmax=len(x_stds)-1, color="blue", linestyle="--", linewidth=2, alpha=0.5, label="lim_std")
-        ax1.hlines(pars[1][1], xmin=0, xmax=len(x_dvts)-1, color="red", linestyle="--", linewidth=2,alpha=0.5, label="lim_dvt")
+        ax1.hlines(pars['lim'][0], xmin=0, xmax=len(x_stds)-1, color="blue", linestyle="--", linewidth=2, alpha=0.5, label="lim_std")
+        ax1.hlines(pars['lim'][1], xmin=0, xmax=len(x_dvts)-1, color="red", linestyle="--", linewidth=2,alpha=0.5, label="lim_dvt")
 
         ax1.fill_between(
             range(len(x_stds)),
-            pars[1][0] - pars[2],
-            pars[1][0] + pars[2],
+            pars['lim'][0] - pars['si_stat'],
+            pars['lim'][0] + pars['si_stat'],
             color="blue",
             alpha=0.2,
             label="lim_std ± si_stat"
         )
         ax1.fill_between(
             range(len(x_dvts)),
-            pars[1][1] - pars[2],
-            pars[1][1] + pars[2],
+            pars['lim'][1] - pars['si_stat'],
+            pars['lim'][1] + pars['si_stat'],
             color="red",
             alpha=0.2,
             label="lim_dvt ± si_stat"
         )
 
-        tau_str = f"std: {pars[0][0]:.2f}, dvt: {pars[0][1]:.2f}" if self.N_ctx == 2 else f"{pars[0]:.2f}"
-        si_q_str = f"std: {pars[3][0]:.2f}, dvt: {pars[3][1]:.2f}" if self.N_ctx == 2 else f"{pars[3]:.2f}"
+        tau_str = f"std: {pars['tau'][0]:.2f}, dvt: {pars['tau'][1]:.2f}" if self.N_ctx == 2 else f"{pars['tau']:.2f}"
+        si_q_str = f"std: {pars['si_q'][0]:.2f}, dvt: {pars['si_q'][1]:.2f}" if self.N_ctx == 2 else f"{pars['si_q']:.2f}"
 
-        title_line1 = f"tau: {tau_str}  |  si_stat: {pars[2]:.2f}  |  si_q: {si_q_str}"
+        title_line1 = f"tau: {tau_str}  |  si_stat: {pars['si_stat']:.2f}  |  si_q: {si_q_str}"
         title_line2 = f"(mu_tau: {self.mu_tau:.2f}, mu_si_stat: {self.si_stat:.2f}, mu_si_q: {self.si_stat * ((2 * self.mu_tau - 1) ** 0.5) / self.mu_tau:.2f}, si_r: {self.si_r:.2f})"
         ax1.set_title(f"{title_line1}\n{title_line2}", y=-0.2)
         ax1.legend(bbox_to_anchor=(1.1, 1))
@@ -1208,15 +1238,10 @@ class HierarchicalAuditGM(AuditGenerativeModel):
                 ax2.text(x=i * self.N_tones + 0.35 * self.N_tones, y=text_y_position - 0.075, s=f"dvt {dpos[i]}", color=self.rules_cmap[rules[i]], transform=ax2.transData, ha="center")
         else:
             ax1.set_xticks(np.arange(0, self.N_blocks * self.N_tones + 1, 50))
-        ax1.hlines(pars[1][0], xmin=0, xmax=len(x_stds)-1, color="blue", linestyle="--", linewidth=2, alpha=0.5, label="lim_std")
-        ax1.hlines(pars[1][1], xmin=0, xmax=len(x_dvts)-1, color="red", linestyle="--", linewidth=2,alpha=0.5, label="lim_dvt")
-        ax1.fill_between(range(len(x_stds)), pars[1][0] - pars[2], pars[1][0] + pars[2], color="blue", alpha=0.2, label="lim_std ± si_stat")
-        ax1.fill_between(range(len(x_dvts)), pars[1][1] - pars[2], pars[1][1] + pars[2], color="red", alpha=0.2, label="lim_dvt ± si_stat")
-        tau_str = f"std: {pars[0][0]:.2f}, dvt: {pars[0][1]:.2f}" if self.N_ctx == 2 else f"{pars[0]:.2f}"
-        si_q_str = f"std: {pars[3][0]:.2f}, dvt: {pars[3][1]:.2f}" if self.N_ctx == 2 else f"{pars[3]:.2f}"
-        title_line1 = f"tau: {tau_str}  |  si_stat: {pars[2]:.2f}  |  si_q: {si_q_str}"
-        title_line2 = f"(mu_tau: {self.mu_tau:.2f}, mu_si_stat: {self.si_stat:.2f}, mu_si_q: {self.si_stat * ((2 * self.mu_tau - 1) ** 0.5) / self.mu_tau:.2f}, si_r: {self.si_r:.2f})"
-        ax1.set_title(f"{title_line1}\n{title_line2}", y=-0.2)
+        ax1.hlines(pars['lim'][0], xmin=0, xmax=len(x_stds)-1, color="blue", linestyle="--", linewidth=2, alpha=0.5, label="lim_std")
+        ax1.hlines(pars['lim'][1], xmin=0, xmax=len(x_dvts)-1, color="red", linestyle="--", linewidth=2,alpha=0.5, label="lim_dvt")
+        ax1.fill_between(range(len(x_stds)), pars['lim'][0] - pars['si_stat'], pars['lim'][0] + pars['si_stat'], color="blue", alpha=0.2, label="lim_std ± si_stat")
+        ax1.fill_between(range(len(x_dvts)), pars['lim'][1] - pars['si_stat'], pars['lim'][1] + pars['si_stat'], color="red", alpha=0.2, label="lim_dvt ± si_stat")
         ax1.legend(bbox_to_anchor=(1.1, 1))
 
         # Bottom subplot: rules/dpos
@@ -1235,11 +1260,6 @@ class HierarchicalAuditGM(AuditGenerativeModel):
         ax3.legend(handles, labels, title="rule")
         if not text:
             ax3.set_xticks(np.arange(0, self.N_blocks + 1, 50))
-        tau_str = f"std: {pars[0][0]:.2f}, dvt: {pars[0][1]:.2f}" if self.N_ctx == 2 else f"{pars[0]:.2f}"
-        si_q_str = f"std: {pars[3][0]:.2f}, dvt: {pars[3][1]:.2f}" if self.N_ctx == 2 else f"{pars[3]:.2f}"
-        title_line1 = f"tau: {tau_str}; si_stat: {pars[2]:.2f}; si_q: {si_q_str}"
-        title_line2 = f"(mu_tau: {self.mu_tau:.2f}, mu_si_stat: {self.si_stat:.2f}, mu_si_q: {self.si_stat * ((2 * self.mu_tau - 1) ** 0.5) / self.mu_tau:.2f}, si_r: {self.si_r:.2f})"
-        ax3.set_title(f"{title_line1}\n{title_line2}", y=-0.2)
 
         # Right subplot: transition matrix pi_rules
         if pi_rules is not None:
@@ -1257,8 +1277,15 @@ class HierarchicalAuditGM(AuditGenerativeModel):
                 for j in range(pi_rules.shape[1]):
                     ax4.text(j, i, f"{pi_rules[i, j]:.2f}", ha="center", va="center", color="black")
 
-        plt.tight_layout(rect=[0, 0, 1, 1])
-        plt.subplots_adjust(left=0.05, right=0.98, top=0.95, bottom=0.08, wspace=0.25, hspace=0.25)
+        # Set figure title
+        tau_str = f"std: {pars['tau'][0]:.2f}, dvt: {pars['tau'][1]:.2f}" if self.N_ctx == 2 else f"{pars['tau']:.2f}"
+        si_q_str = f"std: {pars['si_q'][0]:.2f}, dvt: {pars['si_q'][1]:.2f}" if self.N_ctx == 2 else f"{pars['si_q']:.2f}"
+        title_line1 = f"tau: {tau_str}  |  si_stat: {pars['si_stat']:.2f}  |  si_q: {si_q_str}"
+        title_line2 = f"(mu_tau: {self.mu_tau:.2f}, mu_si_stat: {self.si_stat:.2f}, mu_si_q: {self.si_stat * ((2 * self.mu_tau - 1) ** 0.5) / self.mu_tau:.2f}, si_r: {self.si_r:.2f})"
+        fig.suptitle(f"{title_line1}\n{title_line2}", fontsize=12)
+
+        plt.tight_layout(rect=[0, 0, 1, 0.95])
+        plt.subplots_adjust(left=0.05, right=0.98, top=0.90, bottom=0.08, wspace=0.25, hspace=0.25)
         #plt.show()
 
     def plot_rules_dpos(self, rules, dpos, pars, text=True):
@@ -1300,9 +1327,9 @@ class HierarchicalAuditGM(AuditGenerativeModel):
             # Set x ticks every 50 tones if too many tones
             ax.set_xticks(np.arange(0, self.N_blocks + 1, 50))
 
-        tau_str = f"std: {pars[0][0]:.2f}, dvt: {pars[0][1]:.2f}" if self.N_ctx == 2 else f"{pars[0]:.2f}"
-        si_q_str = f"std: {pars[3][0]:.2f}, dvt: {pars[3][1]:.2f}" if self.N_ctx == 2 else f"{pars[3]:.2f}"
-        title_line1 = f"tau: {tau_str}; si_stat: {pars[2]:.2f}; si_q: {si_q_str}"
+        tau_str = f"std: {pars['tau'][0]:.2f}, dvt: {pars['tau'][1]:.2f}" if self.N_ctx == 2 else f"{pars['tau']:.2f}"
+        si_q_str = f"std: {pars['si_q'][0]:.2f}, dvt: {pars['si_q'][1]:.2f}" if self.N_ctx == 2 else f"{pars['si_q']:.2f}"
+        title_line1 = f"tau: {tau_str}; si_stat: {pars['si_stat']:.2f}; si_q: {si_q_str}"
         title_line2 = f"(mu_tau: {self.mu_tau:.2f}, mu_si_stat: {self.si_stat:.2f}, mu_si_q: {self.si_stat * ((2 * self.mu_tau - 1) ** 0.5) / self.mu_tau:.2f}, si_r: {self.si_r:.2f})"
         plt.title(f"{title_line1}\n{title_line2}", y=-0.2)
         fig.tight_layout()
@@ -1363,7 +1390,7 @@ def example_single(config_single):
         # Plot observation
         axs[i].plot(range(len(obs)), obs, color='tab:blue', label='y_obs')
 
-        axs[i].set_title(f"mu_tau = {tau}, tau = {pars[0]:.2f}")
+        axs[i].set_title(f"mu_tau = {tau}, tau = {pars['tau']:.2f}")
 
     plt.tight_layout()
     plt.show()
@@ -1398,7 +1425,7 @@ if __name__ == "__main__":
         "fix_tau_val": [16,2],
         "fix_lim_val": -0.6,
         "fix_d_val": 2,
-        "fix_pi": False,
+        "fix_pi_rules": False,
         "fix_pi_vals": [0.8, 0.1, 0]
     }
     # example_HGM(config_H)
