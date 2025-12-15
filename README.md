@@ -24,5 +24,5 @@ USAGE NOTES EXPERIMENT (auditPrePro_exp_behavioral.py)
 - keys: v,z,u,i,l (German layout) or v,y,u,i,l (US layout)
 - use the right hand to answer: v = position 3, z/y = position 4, etc.
 - response window = 1.5 seconds
-- after response or no response: indicate how confident you are in your choice using the same keys
+- after response or no response: indicate how confident you are in your choice using the keys 1-5
 - at the beginning and after each block: press space to continue
