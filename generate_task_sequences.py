@@ -47,12 +47,13 @@ class trials_master:
             "fixed_rule_p": 0.1,
             "rules_cmap": {0: "tab:blue", 1: "tab:red", 2: "tab:gray"},
             "fix_process": True, # fix tau, lim, d to input values
+            "tau_std_ind": None,
             "fix_tau_val": [16, 2], # tau std, tau dev
             "fix_lim_val": -0.6, # lim std
             "fix_d_val": 1, # effect size d
-            "fix_pi": True,
+            "fix_pi_rules": True,
             "fix_pi_vals": [0.8, 0.1, 0], # fixed values to create transition matrix
-            "n_sessions": 6, # number of sessions
+            "n_sessions": 4, # number of sessions
             "n_runs": 4, # number of runs per session
             "isi": 0.65, # inter-stimulus interval
             "duration_tones": 0.1, # stimulus duration
@@ -104,13 +105,9 @@ class trials_master:
             mu_tones_all.append(row)
                 
         mu_tones_all = np.array(mu_tones_all)
-        tau_std_ind = np.array([[0, 1, 2, 3],
-                                [3, 2, 1, 0],
-                                [1, 3, 0, 2],
-                                [3, 1, 2, 0],
-                                [2, 3, 0, 1],
-                                [1, 0, 3, 2]])
         
+        tau_std_ind = self.config_H["tau_std_ind"]
+               
         tau_std = [[]]*self.config_H["n_sessions"]
 
         for rep in range(self.config_H["n_sessions"]):
@@ -516,20 +513,19 @@ class trials_master:
                             hgm.plot_combined_with_matrix(states[0], states[1], obs, contexts, rules, dpos, pars, pi_rules=pi_rules, text=False)
                             fig = plt.gcf() 
                             fig.savefig(f"trial_lists/sub-{self.config_H['participant_nr']}/plots/lgd_std_dev_session_{s+1}_run{r+1}_plot_clem.png", dpi=300, bbox_inches='tight')
-                            plt.close()                             
+                            plt.close()                         
                             
-                            si_q_arr.append(pars[3][0])
-                            si_q_dev_arr.append(pars[3][1])
+                            si_q_arr.append(pars['si_q'][0])
+                            si_q_dev_arr.append(pars['si_q'][1])
 
-                            std_rat = pars[3][0]/self.config_H["si_r"]
-                            dev_rat = pars[3][1]/self.config_H["si_r"]
-
+                            std_rat = pars['si_q'][0]/self.config_H["si_r"]
+                            dev_rat = pars['si_q'][1]/self.config_H["si_r"]
                             print(f" ratio si_q/si_r std run {r+1} = {std_rat}")
                             print(f" ratio si_q/si_r dev run {r+1} = {dev_rat}")
 
                             states_std = states[0]
                             states_dev = states[1]
-                            mu_tones[s][r][1] = pars[1][1]
+                            mu_tones[s][r][1] = pars['lim'][1]
 
                 # plot probabilities per run
                 self.plot_probabilities(rules, dpos, r+1, f'session_{s+1}_run')
@@ -631,26 +627,41 @@ class trials_master:
             
 if __name__ == "__main__":
     
-    cnt = -1
+    subs = ['01','02']
 
-    for d in [1, 2]:
-        for si_stat in [0.1, 0.05]: 
-            for si_r_rat in [0.1]:
+    for suby in subs:
 
-                print(f"=== Generating Trials with d = {d}, si_stat = {si_stat}, si_r = {si_stat*si_r_rat}  ===")
-                
-                cnt+= 1
+        cnt = -1
+        tau_std_ind_all = np.array([[0, 1, 2, 3],
+                                    [3, 2, 1, 0],
+                                    [2, 3, 0, 1],
+                                    [1, 0, 3, 2]])
+        np.random.shuffle(tau_std_ind_all)
+        print(tau_std_ind_all)
+        
+        sessions = [1, 2, 3, 4]
+        np.random.shuffle(sessions)
+        print(sessions)
 
-                task = trials_master()
-                task.config_H["participant_nr"] = f"d{d}-si_stat{si_stat}-si_r{round(si_stat*si_r_rat, 2)}"
-                task.config_H["fix_d_val"] = d
-                task.config_H["si_stat"] = si_stat
-                task.config_H["si_r"] = si_stat*si_r_rat
-                task.config_H["n_sessions"] = 1
+        for d in [1, 2]:
+            for si_stat in [0.1, 0.05]:
+                for si_r_rat in [0.1]:
 
-                start = time.time()
-                print("=== Generating Trials ===")
-                task.generate_sessions() 
-                end = time.time()
-                print(f"=== Total Run Time Script: {(end-start)/60} ===")
+                    print(f"=== Generating Trials with d = {d}, si_stat = {si_stat}, si_r = {si_stat*si_r_rat}  ===")
+                    
+                    cnt+= 1
+
+                    task = trials_master()
+                    task.config_H["participant_nr"] = f"{suby}-ses-{sessions[cnt]}-d{d}-si_stat{si_stat}-si_r{round(si_stat*si_r_rat, 3)}"
+                    task.config_H["tau_std_ind"] = np.array([tau_std_ind_all[cnt]])
+                    task.config_H["fix_d_val"] = d
+                    task.config_H["si_stat"] = si_stat
+                    task.config_H["si_r"] = si_stat*si_r_rat
+                    task.config_H["n_sessions"] = 1
+
+                    start = time.time()
+                    print("=== Generating Trials ===")
+                    task.generate_sessions() 
+                    end = time.time()
+                    print(f"=== Total Run Time Script: {(end-start)/60} ===")
            

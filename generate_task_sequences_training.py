@@ -39,7 +39,7 @@ class trials_master:
             "si_rho_timbres": 0.05, # unused for experiment
             # "si_q": 2,  # process noise variance
             "si_stat": 0.05,  # stationary process variance
-            "si_r": 0.01,  # measurement noise variance
+            "si_r": 0.0025,  # measurement noise variance
             "si_d_coef": 0.05, # unused for experiment
             "mu_d": 2, # unused for experiment
             "return_pi_rules": True,
@@ -47,10 +47,10 @@ class trials_master:
             "fixed_rule_p": 0.1,
             "rules_cmap": {0: "tab:blue", 1: "tab:red", 2: "tab:gray"},
             "fix_process": True, # fix tau, lim, d to input values
-            "fix_tau_val": [40, 5], # tau std, tau dev
+            "fix_tau_val": [40, 8], # tau std, tau dev
             "fix_lim_val": -0.6, # lim std
-            "fix_d_val": 3, # effect size d
-            "fix_pi": True,
+            "fix_d_val": 2, # effect size d
+            "fix_pi_rules": True,
             "fix_pi_vals": [0.8, 0.1, 0], # fixed values to create transition matrix
             "n_sessions": 1, # number of sessions
             "n_runs": 1, # number of runs per session
@@ -473,7 +473,7 @@ class trials_master:
                     
                     # use Cléms implementation to generate data per run
                     hgm = gm.HierarchicalAuditGM(self.config_H)
-                    rules, _, dpos, _, _, contexts, states, obs, pars, pi_rules, obs_noise_lvls = hgm.generate_run(return_pars=True, return_pi_rules=self.config_H["return_pi_rules"])
+                    rules, _, dpos, _, _, contexts, states, obs, obs_noise_lvls, pars, pi_rules = hgm.generate_run(return_pars=True, return_pi_rules=self.config_H["return_pi_rules"])
                     obs_noise_lvls_long = obs_noise_lvls.flatten()
 
                     # check if rules are balanced
@@ -484,7 +484,7 @@ class trials_master:
 
                     stationary_distrib = self.compute_stationary(pi_rules)
 
-                    if np.any((p_rules < (stationary_distrib[0]-0.05)) | (p_rules > (stationary_distrib[0]+0.05))) or p_r3 < (stationary_distrib[2]-0.05) or p_r3 > (stationary_distrib[2]+0.05): 
+                    if np.any((p_rules < (stationary_distrib[0]-0.02)) | (p_rules > (stationary_distrib[0]+0.02))) or p_r3 < (stationary_distrib[2]-0.02) or p_r3 > (stationary_distrib[2]+0.02): 
                         # allow for deviations of max. 2% in both directions from the stationary
                         continue
                     else:
@@ -512,6 +512,7 @@ class trials_master:
                             continue
                         else:
                             unbalanced = False
+                            print(stationary_distrib, p_r1, p_r2)
 
                             # plot run using Cléms plotting approach
                             #hgm.plot_combined_with_matrix(states[0], states[1], obs, contexts, rules, dpos, pars, pi_rules=pi_rules, text=False)
@@ -519,18 +520,17 @@ class trials_master:
                             #fig.savefig(f"trial_lists_training/sub-{self.config_H['participant_nr']}/plots/lgd_std_dev_session_{s+1}_run{r+1}_plot_clem.png", dpi=300, bbox_inches='tight')
                             #plt.close()                             
                             
-                            si_q_arr.append(pars[3][0])
-                            si_q_dev_arr.append(pars[3][1])
+                            si_q_arr.append(pars['si_q'][0])
+                            si_q_dev_arr.append(pars['si_q'][1])
 
-                            std_rat = pars[3][0]/self.config_H["si_r"]
-                            dev_rat = pars[3][1]/self.config_H["si_r"]
-
+                            std_rat = pars['si_q'][0]/self.config_H["si_r"]
+                            dev_rat = pars['si_q'][1]/self.config_H["si_r"]
                             print(f" ratio si_q/si_r std run {r+1} = {std_rat}")
                             print(f" ratio si_q/si_r dev run {r+1} = {dev_rat}")
 
                             states_std = states[0]
                             states_dev = states[1]
-                            mu_tones[s][r][1] = pars[1][1]
+                            mu_tones[s][r][1] = pars['lim'][1]
 
                 # plot probabilities per run
                 #self.plot_probabilities(rules, dpos, r+1, f'session_{s+1}_run')
@@ -631,11 +631,16 @@ class trials_master:
         # self.plot_kalman(figy, axy, n_kalman = [8, 16, 24, 32, 40, 48, 56])        
             
 if __name__ == "__main__":
-    
-    task = trials_master() 
 
-    start = time.time()
-    print("=== Generating Trials ===")
-    task.generate_sessions() 
-    end = time.time()
-    print(f"=== Total Run Time Script: {(end-start)/60} ===")
+    subs = ['01','02']
+
+    for suby in subs:
+    
+        task = trials_master() 
+        task.config_H["participant_nr"] = f"{suby}"
+
+        start = time.time()
+        print("=== Generating Trials ===")
+        task.generate_sessions() 
+        end = time.time()
+        print(f"=== Total Run Time Script: {(end-start)/60} ===")
