@@ -627,7 +627,7 @@ class trials_master:
             
 if __name__ == "__main__":
     
-    subs = ['01','02']
+    subs = ['03']
 
     for suby in subs:
 
