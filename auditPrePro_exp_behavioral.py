@@ -41,8 +41,8 @@ prefs.hardware['keyboard'] = 'ptb'
 prefs.hardware['audioLib'] = 'ptb'
 prefs.hardware['audioLatencyMode'] = '4' # could also use 4 but then no fallback in case of small deviation
 #prefs.hardware['audioDevice'] = 'Externe Kopfhörer' # cable headphones
-prefs.hardware['audioDevice'] = 'Mac mini-Lautsprecher' # mac mini speakers
-#prefs.hardware['audioDevice'] = 'Speakers (Realtek HD Audio output)'
+#prefs.hardware['audioDevice'] = 'Mac mini-Lautsprecher' # mac mini speakers
+prefs.hardware['audioDevice'] = 'Speakers (Realtek HD Audio output)'
 
 #---- check psychopy version
 from psychopy import useVersion
@@ -102,11 +102,11 @@ else:
 
 #---- open a screen and test if refresh rate can be measured
 mon = monitors.Monitor('tempMonitor')  # name can be anything
-mon.setSizePix([2569, 1440])  
+mon.setSizePix([3840, 2160])  
 
 win = visual.Window(
-    size=(2569, 1440),
-    fullscr=False,
+    size=(3840, 2160),
+    fullscr=True,
     screen=1,
     units='pix',
     color= 0,
@@ -382,10 +382,9 @@ prompt = visual.TextStim(win, text='bitte jetzt antworten', wrapWidth=2000)
 prompt.height = 100
 prompt.pos = (0, 0)
 
-feed = visual.TextStim(win, text='')
+feed = visual.TextStim(win, text='', wrapWidth=2500)
 feed.color = (0, 0, 0)
 feed.height = 100
-feed.pos = (0, 0)
 feed.pos = (0, 0)
 
 #---- play oddball sequences and record logfiles separately for each run
@@ -445,11 +444,14 @@ for i in range(0, int(n_trials) + 1):
             'trial_no': np.repeat(trial_nr,8)[trial_run[0]:trial_run[1]], # trial no
         })
         
-        if runs[i] == 5:
+        if runs[i] == 5 and session != 'training':
+             data.to_csv(f'logfiles_behavioral/sub-{participant}-ses-{session}-run{runs[i]-1}-events_{date}.tsv', sep='\t', index=False)
+             break
+        if runs[i] == 5 and session == 'training':
              data.to_csv(f'logfiles_behavioral/sub-{participant}-ses-{session}-events_{date}.tsv', sep='\t', index=False)
              break
         else:
-            data.to_csv(f'logfiles_behavioral/sub-{participant}-ses-{session}-events_{date}.tsv', sep='\t', index=False)
+            data.to_csv(f'logfiles_behavioral/sub-{participant}-ses-{session}-run{runs[i]}-events_{date}.tsv', sep='\t', index=False)
         
             # wait for space key press to initialize next run
             pause_kb = keyboard.Keyboard(backend = 'ptb')
@@ -528,31 +530,31 @@ for i in range(0, int(n_trials) + 1):
                                 if correct_key == key_posy:
                                     performance[i] = 1
                                     feed.color = (0, 1, 0)
-                                    feed.text = "richtig"
+                                    feed.text = "richtig\n\nabweichender Ton in der angegebenen Position"
                                     feedback_recorded = True
                                     
                                 else:
                                     performance[i] = 0
                                     feed.color = (1, 0, 0)
-                                    feed.text = "falsch"
+                                    feed.text = "falsch\n\nabweichender Ton in einer anderen Position"
                                     feedback_recorded = True
 
                             elif dpos[i] != 0 and not key_pressed:
                                 performance[i] = 3
                                 feed.color = (1, 0, 0)
-                                feed.text = "falsch"
+                                feed.text = "falsch\n\nabweichender Ton vorhanden"
                                 feedback_recorded = True        
                             
                             elif dpos[i] == 0 and not key_pressed:
                                 performance[i] = 4
                                 feed.color = (0, 1, 0)
-                                feed.text = "richtig"
+                                feed.text = "richtig\n\nkein abweichender Ton vorhanden"
                                 feedback_recorded = True
 
                             elif dpos[i] == 0 and key_pressed:
                                 performance[i] = 5
                                 feed.color = (1, 0, 0)
-                                feed.text = "falsch"
+                                feed.text = "falsch:\n\nkein abweichender Ton vorhanden"
                                 feedback_recorded = True
                                 
                         phase = 'slider'
@@ -569,31 +571,31 @@ for i in range(0, int(n_trials) + 1):
                                 if correct_key == key_posy:
                                     performance[i] = 1
                                     feed.color = (0, 1, 0)
-                                    feed.text = "richtig"
+                                    feed.text = "richtig:\n\nabweichender Ton in der angegebenen Position"
                                     feedback_recorded = True
                                     
                                 else:
                                     performance[i] = 0
                                     feed.color = (1, 0, 0)
-                                    feed.text = "falsch"
+                                    feed.text = "falsch:\n\nabweichender Ton in einer anderen Position"
                                     feedback_recorded = True
                             
                             elif dpos[i] != 0 and not key_pressed:
                                 performance[i] = 3
                                 feed.color = (1, 0, 0)
-                                feed.text = "falsch"
+                                feed.text = "falsch:\n\nabweichender Ton vorhanden"
                                 feedback_recorded = True 
                             
                             elif dpos[i] == 0 and not key_pressed:
                                 performance[i] = 4
                                 feed.color = (0, 1, 0)
-                                feed.text = "richtig"
+                                feed.text = "richtig:\n\nkein abweichender Ton vorhanden"
                                 feedback_recorded = True
                                 
                             elif dpos[i] == 0 and key_pressed:
                                 performance[i] = 5
                                 feed.color = (1, 0, 0)
-                                feed.text = "falsch"
+                                feed.text = "falsch:\n\nkein abweichender Ton vorhanden"
                                 feedback_recorded = True
 
                         phase = 'slider'
@@ -636,7 +638,7 @@ for i in range(0, int(n_trials) + 1):
                 message.pos = (0, 0)        
 
             # safety against losing feedback in frame drop or small timing variance on slider
-            if phase != 'feedback' and slider_time is not None and slider_time > max_slider_time:
+            if phase != 'feedback' and phase != 'ITI' and slider_time is not None and slider_time > max_slider_time:
                 phase = 'feedback'
                 feedback_start = ptb.GetSecs()
                         
@@ -688,7 +690,12 @@ for i in range(0, int(n_trials) + 1):
 #---- display overall performance and wait for end (5 s wait, then space press ends the experiment)
 accuracy = ((len(np.where(np.array(performance) == 1)[0]) + len(np.where(np.array(performance) == 4)[0]))/len(performance))*100
 now = ptb.GetSecs()
-message.text = f"% korrekte Antworten in diesem Durchgang: {accuracy_run: .2f}\n\n\n% korrekte Antworten insgesamt: {accuracy: .2f}\n\n\nEnde des Experiments, bitte gib der Versuchsleitung Bescheid!"
+
+if session != 'training':
+    message.text = f"% korrekte Antworten in diesem Durchgang: {accuracy_run: .2f}\n\n\n% korrekte Antworten insgesamt: {accuracy: .2f}\n\n\nEnde des Experiments, bitte gib der Versuchsleitung Bescheid!"
+if session == 'training':
+    message.text = f"% korrekte Antworten in diesem Trainingsdurchgang: {accuracy_run: .2f}\n\n\nBitte gib der Versuchsleitung Bescheid!"
+
 message.color = (1, 1, 1)
 message.draw()
 win.flip()
