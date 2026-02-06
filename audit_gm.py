@@ -116,12 +116,11 @@ class AuditGenerativeModel:
             if "si_r_bounds" in params.keys():
                 self.si_r_bounds = params["si_r_bounds"]
                 
-            # COMMMENTED OUT AS NOT TESTING D NOW
-            # if "si_d" in params.keys() and params["si_d"] and "mu_d" in params.keys():
-            #     self.mu_d = params["mu_d"]
-            #     si_d_ub = (4 - self.mu_d)/3
-            #     si_d_lb = (self.mu_d - 0.1)/3
-            #     self.si_d_set = np.random.uniform(si_d_lb, si_d_ub, self.N_samples)
+            if "si_d" in params.keys() and params["si_d"] and "mu_d" in params.keys():
+                self.mu_d = params["mu_d"]
+                si_d_ub = (4 - self.mu_d)/3 # from mu_d + 3 * si_d <= 4 --> so that 95% of d <= 4
+                si_d_lb = (self.mu_d - 0.1)/3 # from mu_d - 3 * si_d >= 0.1 --> so that 95% of d >= 0.1
+                self.si_d_set = np.random.uniform(si_d_lb, si_d_ub, self.N_samples)
                 
         else:
             self.params_testing = False
@@ -745,7 +744,12 @@ class AuditGenerativeModel:
         # Generate samples
         if use_parallel:
             pool = ProcessingPool(nodes=n_workers)
-            batch = pool.map(self._generate_single_sample, range(N_samples))
+            try:
+                batch = pool.map(self._generate_single_sample, range(N_samples))
+            finally:
+                pool.close()
+                pool.join()
+                pool.clear()  # pathos-specific: clears the pool cache
         else:
             # Sequential processing
             for samp in range(N_samples):
