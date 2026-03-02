@@ -381,8 +381,8 @@ for runn in np.unique(runs):
     (np.isin(np.array(rule), [0, 1]))
     )
     
-    positions_5 = positions[0][np.where((np.array(dpos)[positions[0]] == 6))[0]]
-    positions_not_5 = positions[0][np.where((np.array(dpos)[positions[0]] != 6))[0]]
+    positions_5 = positions[0][np.where((np.array(dpos)[positions[0]] == 4))[0]]
+    positions_not_5 = positions[0][np.where((np.array(dpos)[positions[0]] != 4))[0]]
 
     while done == False:
         catch_pos[runn] = []
