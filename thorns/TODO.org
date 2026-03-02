@@ -1,0 +1,14 @@
+#+TITLE: TODO list for thorns
+#+AUTHOR: Marek Rudnicki
+#+CATEGORY: thorns
+
+* TODO Python 3 support
+
+* TODO timestamp=True in loaddb() should add timestamp in the output table
+
+  https://github.com/mrkrd/thorns/pull/3
+
+<2015-08-01 Sat 15:12>
+
+
+* TODO Detect unknown/misspelled THxx environment variables

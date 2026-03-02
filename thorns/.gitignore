@@ -1,0 +1,14 @@
+*.o
+*.so
+*.pyc
+*.mat
+*.orig
+*.egg-info
+work
+build
+dist
+.ipynb_checkpoints
+_build
+*.html
+.cache
+.pytest_cache
