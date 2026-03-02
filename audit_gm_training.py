@@ -588,7 +588,7 @@ class AuditGenerativeModel:
 
         # Sample observation noise all at once
         n_tones = contexts.shape[0]*contexts.shape[1]
-        obs_noise_lvls = np.linspace(self.si_r, 0.01, n_tones)
+        obs_noise_lvls = np.linspace(self.si_r, 0.03, n_tones)
         
         v = np.zeros(n_tones)
         cnt = -1
