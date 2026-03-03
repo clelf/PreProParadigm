@@ -290,7 +290,7 @@ class trials_master:
 
         return freq_out 
 
-    def plot_states(self, s, std, dev, tau_std, tau_dev, run_rules, si_q_arr, si_q_dev_arr, mu_tones):
+    def plot_states(self, s, std, dev, tau_std, tau_dev, run_rules, si_q_arr, si_q_dev_arr, mu_tones, run_obs, run_contexts, name):
         '''plot states for one session'''
 
         contexts = ['std', 'dev']
@@ -334,31 +334,42 @@ class trials_master:
         xmin = 0
         xmax = self.config_H["N_blocks"]*self.config_H["N_tones"]*self.config_H["n_runs"]
 
-        # Loop through each quarter
-        for i in range(4):
+        if name == 'input':
+            # Loop through each quarter
+            for i in range(4):
 
-            line_values = mu_tones[s][i]
-            colors = ['b','r']
-            q_start = xmin + i * quarter_width
-            q_end = q_start + quarter_width
-            ind_col = -1
+                line_values = mu_tones[s][i]
+                colors = ['b','r']
+                q_start = xmin + i * quarter_width
+                q_end = q_start + quarter_width
+                ind_col = -1
 
-            for val in line_values:
-                ind_col += 1
+                for val in line_values:
+                    ind_col += 1
 
-                if ind_col == 0:
-                    stationary_std = si_q_arr[i] * tau_std[s][i] / ((2 * tau_std[s][i] - 1) ** 0.5)
-                else:
-                    stationary_std = si_q_dev_arr[i] * tau_dev[s][i] / ((2 * tau_dev[s][i] - 1) ** 0.5)
+                    if ind_col == 0:
+                        stationary_std = si_q_arr[i] * tau_std[s][i] / ((2 * tau_std[s][i] - 1) ** 0.5)
+                    else:
+                        stationary_std = si_q_dev_arr[i] * tau_dev[s][i] / ((2 * tau_dev[s][i] - 1) ** 0.5)
+                    
+                    lbl = f"mu {contexts[ind_col]}" if i == 0 else None
+                    lbl2 = f"stationary std {contexts[ind_col]}" if i == 0 else None
+                    plt.hlines(y=val, xmin=q_start, xmax=q_end,
+                            colors=colors[ind_col], linestyles='--', linewidth=0.5, label=lbl)
+                    plt.fill_between(np.linspace(q_start, q_end, self.config_H["N_blocks"]),
+                        val - stationary_std,
+                        val + stationary_std,
+                        color=colors[ind_col], alpha=0.2, label = lbl2)
                 
-                lbl = f"mu {contexts[ind_col]}" if i == 0 else None
-                lbl2 = f"stationary std {contexts[ind_col]}" if i == 0 else None
-                plt.hlines(y=val, xmin=q_start, xmax=q_end,
-                        colors=colors[ind_col], linestyles='--', linewidth=0.5, label=lbl)
-                plt.fill_between(np.linspace(q_start, q_end, self.config_H["N_blocks"]),
-                    val - stationary_std,
-                    val + stationary_std,
-                    color=colors[ind_col], alpha=0.2, label = lbl2)
+        # add observations
+        indices_dev = np.where(run_contexts == 1)
+        indices_dev = indices_dev[0]
+        obs_hz_array = np.array(run_obs)
+        std_data = obs_hz_array.copy().astype(float)
+        std_data[indices_dev] = np.nan
+
+        ax.plot(std_data,label='standard observation', color='darkblue', alpha=0.7,linestyle='None', marker='.', markersize=2)
+        ax.plot(indices_dev, obs_hz_array[indices_dev],color='darkred', label='deviant observation', alpha=0.7,linestyle='None', marker='.', markersize=2)
 
         ax.set_xlabel('tone')
         ax.set_ylabel('state value')
@@ -367,7 +378,7 @@ class trials_master:
         handles, labels = ax.get_legend_handles_labels()
         ax.legend(handles=tau_legend_patches + handles, loc='upper right')
         plt.tight_layout()
-        plt.savefig(f"trial_lists/sub-{self.config_H['participant_nr']}/plots/lgd_std_dev_session_{s+1}.png", dpi=300, bbox_inches='tight')
+        plt.savefig(f"trial_lists/sub-{self.config_H['participant_nr']}/plots/lgd_std_dev_session_{s+1}_{name}.png", dpi=300, bbox_inches='tight')
         #plt.show()
         plt.close()
 
@@ -562,19 +573,29 @@ class trials_master:
 
             lim_dev_seq = [[mu_tones[s][x][1]]*self.config_H["N_blocks"]*self.config_H["N_tones"] for x in range(len(mu_tones[s]))]
             lim_dev_seq = np.concatenate(lim_dev_seq)
-            
-            # plot states for each full session
-            self.plot_states(s, run_states_std, run_states_dev, tau_std, tau_dev, run_rules, si_q_arr, si_q_dev_arr, mu_tones)
                 
             # apply Kalman filter to each session
             self.apply_kalman(s, run_obs, run_contexts, si_q_arr, mu_tones, tau_std, figy, axy)
 
             # apply frequency transfer to observations and plot observations in Hz
             obs_hz = []
+            state_s_hz = []
+            state_d_hz = []
             for observation in run_obs:
                 hz_val_erb = self.frequency_transfer(observation)
                 obs_hz.append(hz_val_erb)
-            
+
+            for state_s in run_states_std:
+                hz_val_erb = self.frequency_transfer(state_s)
+                state_s_hz.append(hz_val_erb)
+
+            for state_d in run_states_dev:
+                hz_val_erb = self.frequency_transfer(state_d)
+                state_d_hz.append(hz_val_erb)
+
+            # plot states for each full session
+            self.plot_states(s, run_states_std, run_states_dev, tau_std, tau_dev, run_rules, si_q_arr, si_q_dev_arr, mu_tones, run_obs, run_contexts, name = 'input')
+            self.plot_states(s, state_s_hz, state_d_hz, tau_std, tau_dev, run_rules, si_q_arr, si_q_dev_arr, mu_tones, obs_hz, run_contexts, name = 'hz')
             self.plot_observations(s, obs_hz, run_contexts, run_rules, tau_std, run_dpos)   
 
             # save session output file to read in for experiment in psychopy
@@ -591,6 +612,10 @@ class trials_master:
             trials_final['frequency'] = obs_hz
             trials_final['state_std'] = run_states_std
             trials_final['state_dev'] = run_states_dev
+            trials_final['state_std_hz'] = state_s_hz
+            trials_final['state_dev_hz'] = state_d_hz
+            trials_final['diff_std'] = trials_final['frequency'] - trials_final['state_std_hz']
+            trials_final['diff_dev'] = trials_final['frequency'] - trials_final['state_dev_hz']
             
             trials_final['lim_std'] = lim_std_seq
             trials_final['lim_dev'] = lim_dev_seq
@@ -604,6 +629,12 @@ class trials_master:
 
             trials_final['dpos'] = np.repeat(run_dpos, self.config_H["N_tones"])
             trials_final['trial_type'] = run_contexts
+
+            trials_final.loc[trials_final['trial_type'] == 1, 'diff_std'] = np.nan
+            trials_final.loc[trials_final['trial_type'] == 0, 'diff_dev'] = np.nan
+
+            print(f"mean observation noise std: {np.nanmean(np.abs((trials_final['diff_std'])))}")
+            print(f"mean observation noise dev: {np.nanmean(np.abs((trials_final['diff_dev'])))}")
 
             trials_final['sigma_q_std'] = np.repeat([x for x in si_q_arr], self.config_H["N_tones"]*self.config_H["N_blocks"])
             trials_final['sigma_q_dev'] = np.repeat([x for x in si_q_dev_arr], self.config_H["N_tones"]*self.config_H["N_blocks"])
@@ -627,7 +658,7 @@ class trials_master:
             
 if __name__ == "__main__":
     
-    subs = ['03']
+    subs = ["07"]
 
     for suby in subs:
 
@@ -639,24 +670,24 @@ if __name__ == "__main__":
         np.random.shuffle(tau_std_ind_all)
         print(tau_std_ind_all)
         
-        sessions = [1, 2, 3, 4]
+        sessions = [1,2]
         np.random.shuffle(sessions)
         print(sessions)
 
-        for d in [1, 2]:
-            for si_stat in [0.1, 0.05]:
-                for si_r_rat in [0.1]:
+        for d in [0.9]:
+            for si_stat in [0.1]:
+                for si_r_rat in [5,3]:
 
-                    print(f"=== Generating Trials with d = {d}, si_stat = {si_stat}, si_r = {si_stat*si_r_rat}  ===")
+                    print(f"=== Generating Trials with d = {d}, si_stat = {si_stat}, si_r = {si_stat/si_r_rat}  ===")
                     
                     cnt+= 1
 
                     task = trials_master()
-                    task.config_H["participant_nr"] = f"{suby}-ses-{sessions[cnt]}-d{d}-si_stat{si_stat}-si_r{round(si_stat*si_r_rat, 3)}"
+                    task.config_H["participant_nr"] = f"{suby}-ses-{sessions[cnt]}-d{d}-si_stat{si_stat}-si_r{round(si_stat/si_r_rat, 3)}"
                     task.config_H["tau_std_ind"] = np.array([tau_std_ind_all[cnt]])
                     task.config_H["fix_d_val"] = d
                     task.config_H["si_stat"] = si_stat
-                    task.config_H["si_r"] = si_stat*si_r_rat
+                    task.config_H["si_r"] = si_stat/si_r_rat
                     task.config_H["n_sessions"] = 1
 
                     start = time.time()

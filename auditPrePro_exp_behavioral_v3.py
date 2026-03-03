@@ -1,4 +1,4 @@
-Python'''
+'''
 USAGE NOTES SCRIPT
 - run in (standalone version of) psychoPy v 2025.1.1
 - test: psychopy & psychopy backend should be callable --> critical TODO test on MPI Linux
@@ -36,22 +36,22 @@ NOTES on RT Implementation:
 
 #---- set preferences first --> ATTENTION: manually use ptb backend for keyboard later on anyways on Mac!
 from psychopy import prefs
-prefs.general['version'] = '2025.1.1'
+#prefs.general['version'] = '2025.1.1'
 prefs.hardware['keyboard'] = 'ptb'
 prefs.hardware['audioLib'] = 'ptb'
 prefs.hardware['audioLatencyMode'] = '4' # could also use 4 but then no fallback in case of small deviation
-#prefs.hardware['audioDevice'] = 'Externe Kopfhörer' # cable headphones
-#prefs.hardware['audioDevice'] = 'Mac mini-Lautsprecher' # mac mini speakers
-prefs.hardware['audioDevice'] = 'Speakers (Realtek HD Audio output)'
+#prefs.hardware['audioDevice'] = 'Kopfhörer' # cable headphones
+prefs.hardware['audioDevice'] = 'Mac mini-Lautsprecher' # mac mini speakers
+#prefs.hardware['audioDevice'] = 'Speakers (Realtek HD Audio output)'
+#prefs.hardware['audioDevice'] = 'Default' # cable headphones
 
 #---- check psychopy version
-from psychopy import useVersion
+#from psychopy import useVersion
 #useVersion('2025.1.1')
 
 import psychopy
 print(f"Running PsychoPy {psychopy.__version__}")
 
-from psychopy import sound
 from psychtoolbox import PsychPortAudio
 
 #---- imports
@@ -60,9 +60,7 @@ from psychtoolbox import audio
 from psychtoolbox import PsychPortAudio
 PsychPortAudio('Close')
 
-from psychopy import sound
 import sounddevice as sd
-from psychopy.sound import backend_ptb as ptb_back
 from psychopy import core
 from psychopy import visual
 from psychopy.hardware import keyboard
@@ -74,6 +72,11 @@ import numpy as np
 import soundfile as sf
 from datetime import date
 import os
+
+import sys
+sys.path.append('/Users/steinj/Documents/2025_paradigm/thorns')
+
+#import thorns as th
 
 #---- create logfile directory if not already existing
 os.makedirs('logfiles_behavioral/', exist_ok=True)
@@ -187,6 +190,14 @@ slider = visual.Slider(
     markerColor='Red'
 )
 
+# create message for catch trials
+catch_message = visual.TextStim(win, text='Welche Regel war im letzten Durchgang aktiv?\n\n\n\nRegel 1                 Regel 2', wrapWidth=2000)
+catch_message.height = 100
+catch_duration = 4
+
+catch_kb = keyboard.Keyboard(backend='ptb') # set keyboard that can be used to stop the experiment at any point
+catch_kb.waitKeys(maxWait=1) 
+
 #---- functions to generate soundwaves for the sounds and ISI/ITI
 def generate_timbre_waveform(frequency = 1450.0, harmonics = [(1, 1.0), (2, 0.5), (3, 0.33), (4, 0.25), (5, 0.2)], duration = 0.1, sample_rate= 48000, ramp_time = 0.01, hanning = True):
 
@@ -250,9 +261,10 @@ ramp_time = 0.01 # ramp time for on/off ramps
 stim_dur = 0.1 # total stmulus duration incl. on/off ramps
 isi_dur = 0.65 # inter-stimulus-interval
 
-response_window = 1.5 # --> too short? --> TODO pilot
+response_window = 0.75 # --> too short? --> increased a bit such that 1.5 seconds after last deviant
 trial_duration = (8*stim_dur) + (7*isi_dur) # trial duration
 key_pos = ['v','y','u','i','l'] # response keys
+key_pos_catch = ['v','l']
 key_pos_slider = ['1','2','3','4','5']
 feedback_duration = 2 # feedback duration
 
@@ -261,7 +273,8 @@ trials = pd.read_csv(f'{trial_list_dir}sub-{participant}/sub-{participant}_ses-{
 trials['dpos'] = trials['dpos'].fillna(0).astype(int)
 n_trials = len(trials)/8
 
-rts_getsecs = [None]*int(n_trials) # RT based on ptb.getSecs()
+rts_getsecs_trial = [None]*int(n_trials) # RT based on ptb.getSecs() from onset trial
+rts_getsecs_dev = [None]*int(n_trials) # RT based on ptb.getSecs() from onset deviant
 rts_slider_getsecs = [None]*int(n_trials) # RT for confidence slider based on ptb.getSecs()
 keys_pressed = [None]*int(n_trials) # pressed key
 performance = [None]*int(n_trials) # correct?
@@ -330,8 +343,8 @@ for i in range(0, len(trials), 8):
     lim_dev.append(lim_devy)
             
     ITI = trials['ITI'][i]
-    ITI_list.append(ITI)
-        
+    ITI_list.append(ITI)    
+   
     tone_count = 0
     
     for s in oddball_trial:
@@ -353,6 +366,49 @@ for i in range(0, len(trials), 8):
     waveform = waveform.astype(np.float32)
     buffer_handle = PsychPortAudio('CreateBuffer', [], waveform)
     buffer_handles.append(buffer_handle)
+
+# insert catch trials
+catch_all = []
+n_catch = 10
+catch_pos = [[]]*len(np.unique(runs))
+
+for runn in np.unique(runs):
+
+    done = False
+
+    positions = np.where(
+    (np.array(runs) == runn) &
+    (np.isin(np.array(rule), [0, 1]))
+    )
+    
+    while done == False:
+        catch_pos[runn] = []
+        
+        while len(catch_pos[runn]) < n_catch:
+            test_pos = np.random.choice(positions[0])
+            catch_pos[runn].append(test_pos)
+
+        catch_pos[runn] = sorted(catch_pos[runn])
+        print(catch_pos[runn])
+
+        done = (
+        all(catch_pos[runn][i] - catch_pos[runn][i-1] > 2 for i in range(1, len(catch_pos[runn]))) # at least two trials in between
+        and not np.isin(catch_pos[runn], [np.where(runs == runn)[0][0], np.where(runs == runn)[0][-1]]).any() # not first or last trial
+        )
+
+    data_run = np.array([runs == runn])
+    catch_pos_run = np.zeros(len(np.where(data_run[0]==True)[0]))
+    catch_pos[runn] = list(map(lambda x: x + 1, catch_pos[runn]))
+    catch_pos_run[catch_pos[runn]-np.where(runs == runn)[0][0]] = 1
+
+    catch_all.append(catch_pos_run)
+
+catch_all = [item for sublist in catch_all for item in sublist] 
+print(catch_all)
+catch_key_list = []
+catch_correct_list = []
+catch_rt_list = []
+is_catch = []
 
 #---- wait for space press to start
 message = visual.TextStim(win, text='Drücke die Leertaste, um zu starten.', wrapWidth=2000)
@@ -407,7 +463,8 @@ for i in range(0, int(n_trials) + 1):
 
         # compute accuracy for full run to present to participant
         accuracy_run = ((len(np.where(np.array(performance[trial_run_slow[0]:trial_run_slow[1]]) == 1)[0]) + len(np.where(np.array(performance[trial_run_slow[0]:trial_run_slow[1]]) == 4)[0]))/len(performance[trial_run_slow[0]:trial_run_slow[1]]))*100
-        message.text = f"% korrekte Antworten in diesem Durchgang: {accuracy_run: .2f}\n\n\nKurze Pause!\n\n\nWeiter geht's mit der Leertaste"
+        accuracy_catch_run =((len(np.where(np.array(catch_correct_list[trial_run_slow[0]:trial_run_slow[1]]) == 1)[0]))/n_catch)*100
+        message.text = f"% korrekte Positionen in diesem Durchgang: {accuracy_run: .2f}\n\n\n% korrekte Regeln in diesem Durchgang: {accuracy_catch_run: .2f}\n\n\nKurze Pause!\n\n\nWeiter geht's mit der Leertaste"
         message.draw()
         win.flip()
         
@@ -428,7 +485,8 @@ for i in range(0, int(n_trials) + 1):
             'offset_iti': np.repeat(offset_iti_list[trial_run_slow[0]:trial_run_slow[1]],8), # based on theoretical duration
             'offset_iti_getsecs': np.repeat(offset_iti_list_getsecs[trial_run_slow[0]:trial_run_slow[1]],8), # based on getsecs()
             'ITI': np.repeat(ITI_list,8)[trial_run[0]:trial_run[1]], # theoretical ITI
-            'rt_getsecs': np.repeat(rts_getsecs[trial_run_slow[0]:trial_run_slow[1]],8), # response time based on getsecs
+            'rt_getsecs_trial': np.repeat(rts_getsecs_trial[trial_run_slow[0]:trial_run_slow[1]],8), # response time based on getsecs from trial start
+            'rt_getsecs_dev': np.repeat(rts_getsecs_dev[trial_run_slow[0]:trial_run_slow[1]],8), # response time based on getsecs from trial start
             'rt_slider_getsecs': np.repeat(rts_slider_getsecs[trial_run_slow[0]:trial_run_slow[1]],8), # response time for slider based on getsecs
             'tau_std': np.repeat(tau,8)[trial_run[0]:trial_run[1]], # tau std
             'frequency': frequency[trial_run[0]:trial_run[1]], # sound frequency (base)
@@ -440,6 +498,10 @@ for i in range(0, int(n_trials) + 1):
             'rule': np.repeat(rule,8)[trial_run[0]:trial_run[1]], # rule no
             'dpos': np.repeat(dpos,8)[trial_run[0]:trial_run[1]], # deviant position
             'trial_type': np.concatenate(tone_type)[trial_run[0]:trial_run[1]], # standard or deviant?
+            'is_catch_n_minus_one':np.repeat(is_catch,8)[trial_run[0]:trial_run[1]],
+            'catch_key':np.repeat(catch_key_list,8)[trial_run[0]:trial_run[1]],
+            'catch_correct':np.repeat(catch_correct_list,8)[trial_run[0]:trial_run[1]],
+            'catch_rt':np.repeat(catch_rt_list,8)[trial_run[0]:trial_run[1]],
             'runs': np.repeat(runs,8)[trial_run[0]:trial_run[1]], # run no
             'trial_no': np.repeat(trial_nr,8)[trial_run[0]:trial_run[1]], # trial no
         })
@@ -460,6 +522,55 @@ for i in range(0, int(n_trials) + 1):
             message.draw()
             win.flip()
     
+    if catch_all[i] == 1:
+        
+        catch_correct = None
+        catch_press = False
+        catch_name = None
+        catch_rt_trial = None
+        catch_start = ptb.GetSecs()
+
+        catch_message.draw()
+        win.flip()
+
+        while ptb.GetSecs() - catch_start <= catch_duration:
+
+            if 'escape' in [k.name for k in escape_kb.getKeys(['escape'], waitRelease=False)]:
+                core.quit(); sys.exit()
+            
+            rule_correct = rule[i-1]
+
+            catch_keys = catch_kb.getKeys(key_pos_catch, waitRelease=False)
+
+            if catch_keys and not catch_press:
+                key_pressed = True
+                catch_name = catch_keys[0].name
+                catch_time = ptb.GetSecs()
+                catch_rt_trial = catch_time - catch_start
+
+                if catch_name == key_pos_catch[0] and rule_correct == 0:
+                    catch_correct = 1
+                elif catch_name == key_pos_catch[1] and rule_correct == 1:
+                    catch_correct = 1
+                else:
+                    catch_correct = 0
+
+                message.text = '+'
+                message.draw()
+                win.flip()
+
+        catch_key_list.append(catch_name)
+        catch_correct_list.append(catch_correct)
+        catch_rt_list.append(catch_rt_trial)  
+        is_catch.append(1)   
+
+    elif catch_all[i] == 0:
+        catch_key_list.append(None)
+        catch_correct_list.append(None)
+        catch_rt_list.append(None)  
+        is_catch.append(0)  
+
+    
     phase ='stimulus'
     key_pressed = False
     slider_key_pressed = False
@@ -469,7 +580,8 @@ for i in range(0, int(n_trials) + 1):
     feedback_start = None
     response_start = None
     key_name = None
-    key_rt = None
+    key_rt_trial = None
+    key_rt_dev = None
     slider_rt = None
     slider_end = None
     slider_time = None
@@ -490,6 +602,16 @@ for i in range(0, int(n_trials) + 1):
     while True:
         
         elapsed = ptb.GetSecs() 
+
+        if key_pressed == False: # only record first response
+
+            response_keys = response_kb.getKeys(key_pos, waitRelease=False)
+
+            if response_keys and not key_pressed:
+                key_pressed = True
+                key_name = response_keys[0].name
+                key_time = ptb.GetSecs()
+                key_rt_trial = key_time - onset # rt relative to trial onset --> compute relative to deviant onset later
         
         # make experiment closable by Esc key press
         if 'escape' in [k.name for k in escape_kb.getKeys(['escape'], waitRelease=False)]:
@@ -511,95 +633,47 @@ for i in range(0, int(n_trials) + 1):
                     onset_iti = ptb.GetSecs()
                   
             elif phase == 'response':
-                
-                if key_pressed == False:
-                    
-                    response_keys = response_kb.getKeys(key_pos, waitRelease=False)
+                              
+                if elapsed-onset > trial_duration + response_window:
 
-                    if response_keys and not key_pressed:
-                        key_pressed = True
-                        key_name = response_keys[0].name
-                        key_rt = ptb.GetSecs() - response_start
-
-                        if not feedback_recorded:
-                
-                            if dpos[i] != 0 and key_pressed:
-                                correct_key = dpos[i] - 2
-                                key_posy = key_pos.index(key_name)
-                                
-                                if correct_key == key_posy:
-                                    performance[i] = 1
-                                    feed.color = (0, 1, 0)
-                                    feed.text = "richtig\n\nabweichender Ton in der angegebenen Position"
-                                    feedback_recorded = True
-                                    
-                                else:
-                                    performance[i] = 0
-                                    feed.color = (1, 0, 0)
-                                    feed.text = "falsch\n\nabweichender Ton in einer anderen Position"
-                                    feedback_recorded = True
-
-                            elif dpos[i] != 0 and not key_pressed:
-                                performance[i] = 3
-                                feed.color = (1, 0, 0)
-                                feed.text = "falsch\n\nabweichender Ton vorhanden"
-                                feedback_recorded = True        
+                    if not feedback_recorded:
+            
+                        if dpos[i] != 0 and key_pressed:
+                            correct_key = dpos[i] - 2
+                            key_posy = key_pos.index(key_name)
                             
-                            elif dpos[i] == 0 and not key_pressed:
-                                performance[i] = 4
+                            if correct_key == key_posy:
+                                performance[i] = 1
                                 feed.color = (0, 1, 0)
-                                feed.text = "richtig\n\nkein abweichender Ton vorhanden"
+                                feed.text = "richtig:\n\nabweichender Ton in der angegebenen Position"
                                 feedback_recorded = True
-
-                            elif dpos[i] == 0 and key_pressed:
-                                performance[i] = 5
+                                
+                            else:
+                                performance[i] = 0
                                 feed.color = (1, 0, 0)
-                                feed.text = "falsch:\n\nkein abweichender Ton vorhanden"
+                                feed.text = "falsch:\n\nabweichender Ton in einer anderen Position"
                                 feedback_recorded = True
-                                
-                        phase = 'slider'
-                        slider_start = ptb.GetSecs()
-                    
-                    elif elapsed-onset > trial_duration + response_window:
-
-                        if not feedback_recorded:
-                
-                            if dpos[i] != 0 and key_pressed:
-                                correct_key = dpos[i] - 2
-                                key_posy = key_pos.index(key_name)
-                                
-                                if correct_key == key_posy:
-                                    performance[i] = 1
-                                    feed.color = (0, 1, 0)
-                                    feed.text = "richtig:\n\nabweichender Ton in der angegebenen Position"
-                                    feedback_recorded = True
-                                    
-                                else:
-                                    performance[i] = 0
-                                    feed.color = (1, 0, 0)
-                                    feed.text = "falsch:\n\nabweichender Ton in einer anderen Position"
-                                    feedback_recorded = True
+                        
+                        elif dpos[i] != 0 and not key_pressed:
+                            performance[i] = 3
+                            feed.color = (1, 0, 0)
+                            feed.text = "falsch:\n\nabweichender Ton vorhanden"
+                            feedback_recorded = True 
+                        
+                        elif dpos[i] == 0 and not key_pressed:
+                            performance[i] = 4
+                            feed.color = (0, 1, 0)
+                            feed.text = "richtig:\n\nkein abweichender Ton vorhanden"
+                            feedback_recorded = True
                             
-                            elif dpos[i] != 0 and not key_pressed:
-                                performance[i] = 3
-                                feed.color = (1, 0, 0)
-                                feed.text = "falsch:\n\nabweichender Ton vorhanden"
-                                feedback_recorded = True 
-                            
-                            elif dpos[i] == 0 and not key_pressed:
-                                performance[i] = 4
-                                feed.color = (0, 1, 0)
-                                feed.text = "richtig:\n\nkein abweichender Ton vorhanden"
-                                feedback_recorded = True
-                                
-                            elif dpos[i] == 0 and key_pressed:
-                                performance[i] = 5
-                                feed.color = (1, 0, 0)
-                                feed.text = "falsch:\n\nkein abweichender Ton vorhanden"
-                                feedback_recorded = True
+                        elif dpos[i] == 0 and key_pressed:
+                            performance[i] = 5
+                            feed.color = (1, 0, 0)
+                            feed.text = "falsch:\n\nkein abweichender Ton vorhanden"
+                            feedback_recorded = True
 
-                        phase = 'slider'
-                        slider_start = ptb.GetSecs()
+                    phase = 'slider'
+                    slider_start = ptb.GetSecs()
 
             elif phase == 'slider':
             
@@ -649,7 +723,7 @@ for i in range(0, int(n_trials) + 1):
             elif phase == 'feedback':
                 feed.draw()    
             elif phase == 'response':
-                prompt.draw()    
+                message.draw()    
             elif phase == 'slider':
                 question.draw()
                 slider.draw()
@@ -675,12 +749,16 @@ for i in range(0, int(n_trials) + 1):
     onset_iti_list.append(onset + trial_duration) # theoretical based on measured onset + known duration
     offset_iti_list.append(onset + trial_duration + ITI_list[i]) # theoretical based on measured onset + known durations
     
+    
     if key_pressed == True:
+        key_rt_dev = key_time - single_onsets[dpos[i]] 
         keys_pressed[i] = key_name
-        rts_getsecs[i] = key_rt
+        rts_getsecs_trial[i] = key_rt_trial
+        rts_getsecs_dev[i] = key_rt_dev
     else:
         keys_pressed[i] = None
-        rts_getsecs[i] = None  
+        rts_getsecs_trial[i] = None
+        rts_getsecs_dev[i] = None   
 
     if slider_key_pressed == True:
         rts_slider_getsecs[i] = slider_rt
@@ -689,12 +767,13 @@ for i in range(0, int(n_trials) + 1):
 
 #---- display overall performance and wait for end (5 s wait, then space press ends the experiment)
 accuracy = ((len(np.where(np.array(performance) == 1)[0]) + len(np.where(np.array(performance) == 4)[0]))/len(performance))*100
+catch_accuracy = ((len(np.where(np.array(catch_correct_list) == 1)[0]))/(n_catch*(len(np.unique(np.array(runs)))-1)))*100
 now = ptb.GetSecs()
 
 if session != 'training':
-    message.text = f"% korrekte Antworten in diesem Durchgang: {accuracy_run: .2f}\n\n\n% korrekte Antworten insgesamt: {accuracy: .2f}\n\n\nEnde des Experiments, bitte gib der Versuchsleitung Bescheid!"
+    message.text = f"% korrekte Positionen in diesem Durchgang: {accuracy_run: .2f}\n% korrekte Positionen insgesamt: {accuracy: .2f}\n% korrekte Regeln in diesem Durchgang: {accuracy_catch_run: .2f}\n% korrekte Regeln insgesamt: {catch_accuracy: .2f}\n\nEnde des Experiments, bitte gib der Versuchsleitung Bescheid!"
 if session == 'training':
-    message.text = f"% korrekte Antworten in diesem Trainingsdurchgang: {accuracy_run: .2f}\n\n\nBitte gib der Versuchsleitung Bescheid!"
+    message.text = f"% korrekte Positionen in diesem Trainingsdurchgang: {accuracy_run: .2f}\n\n\n% korrekte Regeln in diesem Trainingsdurchgang: {catch_accuracy: .2f}\n\n\nBitte gib der Versuchsleitung Bescheid!"
 
 message.color = (1, 1, 1)
 message.draw()

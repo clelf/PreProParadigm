@@ -1,4 +1,4 @@
-Python'''
+'''
 USAGE NOTES SCRIPT
 - run in (standalone version of) psychoPy v 2025.1.1
 - test: psychopy & psychopy backend should be callable --> critical TODO test on MPI Linux
@@ -36,7 +36,7 @@ NOTES on RT Implementation:
 
 #---- set preferences first --> ATTENTION: manually use ptb backend for keyboard later on anyways on Mac!
 from psychopy import prefs
-prefs.general['version'] = '2025.1.1'
+#prefs.general['version'] = '2025.1.1'
 prefs.hardware['keyboard'] = 'ptb'
 prefs.hardware['audioLib'] = 'ptb'
 prefs.hardware['audioLatencyMode'] = '4' # could also use 4 but then no fallback in case of small deviation
@@ -45,13 +45,12 @@ prefs.hardware['audioLatencyMode'] = '4' # could also use 4 but then no fallback
 prefs.hardware['audioDevice'] = 'Speakers (Realtek HD Audio output)'
 
 #---- check psychopy version
-from psychopy import useVersion
+#from psychopy import useVersion
 #useVersion('2025.1.1')
 
 import psychopy
 print(f"Running PsychoPy {psychopy.__version__}")
 
-from psychopy import sound
 from psychtoolbox import PsychPortAudio
 
 #---- imports
@@ -60,9 +59,7 @@ from psychtoolbox import audio
 from psychtoolbox import PsychPortAudio
 PsychPortAudio('Close')
 
-from psychopy import sound
 import sounddevice as sd
-from psychopy.sound import backend_ptb as ptb_back
 from psychopy import core
 from psychopy import visual
 from psychopy.hardware import keyboard
@@ -74,6 +71,11 @@ import numpy as np
 import soundfile as sf
 from datetime import date
 import os
+
+import sys
+sys.path.append('/Users/steinj/Documents/2025_paradigm/thorns')
+
+import thorns as th
 
 #---- create logfile directory if not already existing
 os.makedirs('logfiles_behavioral/', exist_ok=True)
@@ -250,7 +252,7 @@ ramp_time = 0.01 # ramp time for on/off ramps
 stim_dur = 0.1 # total stmulus duration incl. on/off ramps
 isi_dur = 0.65 # inter-stimulus-interval
 
-response_window = 1.5 # --> too short? --> TODO pilot
+response_window = 0.5 # --> too short? --> TODO pilot
 trial_duration = (8*stim_dur) + (7*isi_dur) # trial duration
 key_pos = ['v','y','u','i','l'] # response keys
 key_pos_slider = ['1','2','3','4','5']
@@ -261,7 +263,8 @@ trials = pd.read_csv(f'{trial_list_dir}sub-{participant}/sub-{participant}_ses-{
 trials['dpos'] = trials['dpos'].fillna(0).astype(int)
 n_trials = len(trials)/8
 
-rts_getsecs = [None]*int(n_trials) # RT based on ptb.getSecs()
+rts_getsecs_trial = [None]*int(n_trials) # RT based on ptb.getSecs() from onset trial
+rts_getsecs_dev = [None]*int(n_trials) # RT based on ptb.getSecs() from onset deviant
 rts_slider_getsecs = [None]*int(n_trials) # RT for confidence slider based on ptb.getSecs()
 keys_pressed = [None]*int(n_trials) # pressed key
 performance = [None]*int(n_trials) # correct?
@@ -330,8 +333,8 @@ for i in range(0, len(trials), 8):
     lim_dev.append(lim_devy)
             
     ITI = trials['ITI'][i]
-    ITI_list.append(ITI)
-        
+    ITI_list.append(ITI)    
+   
     tone_count = 0
     
     for s in oddball_trial:
@@ -428,7 +431,8 @@ for i in range(0, int(n_trials) + 1):
             'offset_iti': np.repeat(offset_iti_list[trial_run_slow[0]:trial_run_slow[1]],8), # based on theoretical duration
             'offset_iti_getsecs': np.repeat(offset_iti_list_getsecs[trial_run_slow[0]:trial_run_slow[1]],8), # based on getsecs()
             'ITI': np.repeat(ITI_list,8)[trial_run[0]:trial_run[1]], # theoretical ITI
-            'rt_getsecs': np.repeat(rts_getsecs[trial_run_slow[0]:trial_run_slow[1]],8), # response time based on getsecs
+            'rt_getsecs_trial': np.repeat(rts_getsecs_trial[trial_run_slow[0]:trial_run_slow[1]],8), # response time based on getsecs from trial start
+            'rt_getsecs_dev': np.repeat(rts_getsecs_dev[trial_run_slow[0]:trial_run_slow[1]],8), # response time based on getsecs from trial start
             'rt_slider_getsecs': np.repeat(rts_slider_getsecs[trial_run_slow[0]:trial_run_slow[1]],8), # response time for slider based on getsecs
             'tau_std': np.repeat(tau,8)[trial_run[0]:trial_run[1]], # tau std
             'frequency': frequency[trial_run[0]:trial_run[1]], # sound frequency (base)
@@ -469,7 +473,8 @@ for i in range(0, int(n_trials) + 1):
     feedback_start = None
     response_start = None
     key_name = None
-    key_rt = None
+    key_rt_trial = None
+    key_rt_dev = None
     slider_rt = None
     slider_end = None
     slider_time = None
@@ -490,6 +495,16 @@ for i in range(0, int(n_trials) + 1):
     while True:
         
         elapsed = ptb.GetSecs() 
+
+        if key_pressed == False: # only record first response
+
+            response_keys = response_kb.getKeys(key_pos, waitRelease=False)
+
+            if response_keys and not key_pressed:
+                key_pressed = True
+                key_name = response_keys[0].name
+                key_time = ptb.GetSecs()
+                key_rt_trial = key_time - onset # rt relative to trial onset --> compute relative to deviant onset later
         
         # make experiment closable by Esc key press
         if 'escape' in [k.name for k in escape_kb.getKeys(['escape'], waitRelease=False)]:
@@ -511,95 +526,47 @@ for i in range(0, int(n_trials) + 1):
                     onset_iti = ptb.GetSecs()
                   
             elif phase == 'response':
-                
-                if key_pressed == False:
-                    
-                    response_keys = response_kb.getKeys(key_pos, waitRelease=False)
+                              
+                if elapsed-onset > trial_duration + response_window:
 
-                    if response_keys and not key_pressed:
-                        key_pressed = True
-                        key_name = response_keys[0].name
-                        key_rt = ptb.GetSecs() - response_start
-
-                        if not feedback_recorded:
-                
-                            if dpos[i] != 0 and key_pressed:
-                                correct_key = dpos[i] - 2
-                                key_posy = key_pos.index(key_name)
-                                
-                                if correct_key == key_posy:
-                                    performance[i] = 1
-                                    feed.color = (0, 1, 0)
-                                    feed.text = "richtig\n\nabweichender Ton in der angegebenen Position"
-                                    feedback_recorded = True
-                                    
-                                else:
-                                    performance[i] = 0
-                                    feed.color = (1, 0, 0)
-                                    feed.text = "falsch\n\nabweichender Ton in einer anderen Position"
-                                    feedback_recorded = True
-
-                            elif dpos[i] != 0 and not key_pressed:
-                                performance[i] = 3
-                                feed.color = (1, 0, 0)
-                                feed.text = "falsch\n\nabweichender Ton vorhanden"
-                                feedback_recorded = True        
+                    if not feedback_recorded:
+            
+                        if dpos[i] != 0 and key_pressed:
+                            correct_key = dpos[i] - 2
+                            key_posy = key_pos.index(key_name)
                             
-                            elif dpos[i] == 0 and not key_pressed:
-                                performance[i] = 4
+                            if correct_key == key_posy:
+                                performance[i] = 1
                                 feed.color = (0, 1, 0)
-                                feed.text = "richtig\n\nkein abweichender Ton vorhanden"
+                                feed.text = "richtig:\n\nabweichender Ton in der angegebenen Position"
                                 feedback_recorded = True
-
-                            elif dpos[i] == 0 and key_pressed:
-                                performance[i] = 5
+                                
+                            else:
+                                performance[i] = 0
                                 feed.color = (1, 0, 0)
-                                feed.text = "falsch:\n\nkein abweichender Ton vorhanden"
+                                feed.text = "falsch:\n\nabweichender Ton in einer anderen Position"
                                 feedback_recorded = True
-                                
-                        phase = 'slider'
-                        slider_start = ptb.GetSecs()
-                    
-                    elif elapsed-onset > trial_duration + response_window:
-
-                        if not feedback_recorded:
-                
-                            if dpos[i] != 0 and key_pressed:
-                                correct_key = dpos[i] - 2
-                                key_posy = key_pos.index(key_name)
-                                
-                                if correct_key == key_posy:
-                                    performance[i] = 1
-                                    feed.color = (0, 1, 0)
-                                    feed.text = "richtig:\n\nabweichender Ton in der angegebenen Position"
-                                    feedback_recorded = True
-                                    
-                                else:
-                                    performance[i] = 0
-                                    feed.color = (1, 0, 0)
-                                    feed.text = "falsch:\n\nabweichender Ton in einer anderen Position"
-                                    feedback_recorded = True
+                        
+                        elif dpos[i] != 0 and not key_pressed:
+                            performance[i] = 3
+                            feed.color = (1, 0, 0)
+                            feed.text = "falsch:\n\nabweichender Ton vorhanden"
+                            feedback_recorded = True 
+                        
+                        elif dpos[i] == 0 and not key_pressed:
+                            performance[i] = 4
+                            feed.color = (0, 1, 0)
+                            feed.text = "richtig:\n\nkein abweichender Ton vorhanden"
+                            feedback_recorded = True
                             
-                            elif dpos[i] != 0 and not key_pressed:
-                                performance[i] = 3
-                                feed.color = (1, 0, 0)
-                                feed.text = "falsch:\n\nabweichender Ton vorhanden"
-                                feedback_recorded = True 
-                            
-                            elif dpos[i] == 0 and not key_pressed:
-                                performance[i] = 4
-                                feed.color = (0, 1, 0)
-                                feed.text = "richtig:\n\nkein abweichender Ton vorhanden"
-                                feedback_recorded = True
-                                
-                            elif dpos[i] == 0 and key_pressed:
-                                performance[i] = 5
-                                feed.color = (1, 0, 0)
-                                feed.text = "falsch:\n\nkein abweichender Ton vorhanden"
-                                feedback_recorded = True
+                        elif dpos[i] == 0 and key_pressed:
+                            performance[i] = 5
+                            feed.color = (1, 0, 0)
+                            feed.text = "falsch:\n\nkein abweichender Ton vorhanden"
+                            feedback_recorded = True
 
-                        phase = 'slider'
-                        slider_start = ptb.GetSecs()
+                    phase = 'slider'
+                    slider_start = ptb.GetSecs()
 
             elif phase == 'slider':
             
@@ -649,7 +616,7 @@ for i in range(0, int(n_trials) + 1):
             elif phase == 'feedback':
                 feed.draw()    
             elif phase == 'response':
-                prompt.draw()    
+                message.draw()    
             elif phase == 'slider':
                 question.draw()
                 slider.draw()
@@ -674,13 +641,16 @@ for i in range(0, int(n_trials) + 1):
     offset_iti_list_getsecs.append(offset_iti)
     onset_iti_list.append(onset + trial_duration) # theoretical based on measured onset + known duration
     offset_iti_list.append(onset + trial_duration + ITI_list[i]) # theoretical based on measured onset + known durations
+    key_rt_dev = key_time - single_onsets[dpos[i]] # get key rt relative to deviant onset (still relative to trial onset incase of omission trials)
     
     if key_pressed == True:
         keys_pressed[i] = key_name
-        rts_getsecs[i] = key_rt
+        rts_getsecs_trial[i] = key_rt_trial
+        rts_getsecs_dev[i] = key_rt_dev
     else:
         keys_pressed[i] = None
-        rts_getsecs[i] = None  
+        rts_getsecs_trial[i] = None
+        rts_getsecs_dev[i] = None   
 
     if slider_key_pressed == True:
         rts_slider_getsecs[i] = slider_rt

@@ -39,7 +39,7 @@ class trials_master:
             "si_rho_timbres": 0.05, # unused for experiment
             # "si_q": 2,  # process noise variance
             "si_stat": 0.05,  # stationary process variance
-            "si_r": 0.0025,  # measurement noise variance
+            "si_r": 0.005,  # measurement noise variance
             "si_d_coef": 0.05, # unused for experiment
             "mu_d": 2, # unused for experiment
             "return_pi_rules": True,
@@ -88,7 +88,7 @@ class trials_master:
         NOTE: only roughly balanced for 6 sessions, might need change'''
         
         mu_tones = [[-0.6, None], [-0.6, None]]
-        taus = [40, 40, 40, 40]
+        taus = [40]
         mu_tones_all = []
 
         for rep in range(self.config_H["n_sessions"]):
@@ -104,12 +104,7 @@ class trials_master:
             mu_tones_all.append(row)
                 
         mu_tones_all = np.array(mu_tones_all)
-        tau_std_ind = np.array([[0, 0, 0, 0],
-                                [3, 2, 1, 0],
-                                [1, 3, 0, 2],
-                                [3, 1, 2, 0],
-                                [2, 3, 0, 1],
-                                [1, 0, 3, 2]])
+        tau_std_ind = np.array([[0]])
         
         tau_std = [[]]*self.config_H["n_sessions"]
 
@@ -293,7 +288,7 @@ class trials_master:
 
         return freq_out 
 
-    def plot_states(self, s, std, dev, tau_std, tau_dev, run_rules, si_q_arr, si_q_dev_arr, mu_tones, obs_hz, run_contexts):
+    def plot_states(self, s, std, dev, tau_std, tau_dev, run_rules, si_q_arr, si_q_dev_arr, mu_tones, run_obs, run_contexts, name):
         '''plot states for one session'''
 
         contexts = ['std', 'dev']
@@ -320,10 +315,7 @@ class trials_master:
                 ax.axvspan(j - 0.5, j + 0.5, color='gray', alpha=0.1)
 
         colors_tau = {
-            tau_std[s][0]: 'black',
-            tau_std[s][1]: 'dimgrey',
-            tau_std[s][2]: 'lightgrey',
-            tau_std[s][3]: 'darkgrey'
+            tau_std[s][0]: 'black'
         }
 
         for k, r in enumerate(tau_std_seq):
@@ -337,41 +329,51 @@ class trials_master:
         xmin = 0
         xmax = self.config_H["N_blocks"]*self.config_H["N_tones"]*self.config_H["n_runs"]
 
-        # Loop through each quarter
-        for i in range(4):
+        if name == 'input':
+            # Loop through each quarter
+            for i in range(1):
 
-            line_values = mu_tones[s][i]
-            colors = ['b','r']
-            q_start = xmin + i * quarter_width
-            q_end = q_start + quarter_width
-            ind_col = -1
+                line_values = mu_tones[s][i]
+                colors = ['b','r']
+                q_start = xmin + i * quarter_width
+                q_end = q_start + quarter_width
+                ind_col = -1
 
-            for val in line_values:
-                ind_col += 1
+                for val in line_values:
+                    ind_col += 1
 
-                if ind_col == 0:
-                    stationary_std = si_q_arr[i] * tau_std[s][i] / ((2 * tau_std[s][i] - 1) ** 0.5)
-                else:
-                    stationary_std = si_q_dev_arr[i] * tau_dev[s][i] / ((2 * tau_dev[s][i] - 1) ** 0.5)
+                    if ind_col == 0:
+                        stationary_std = si_q_arr[i] * tau_std[s][i] / ((2 * tau_std[s][i] - 1) ** 0.5)
+                    else:
+                        stationary_std = si_q_dev_arr[i] * tau_dev[s][i] / ((2 * tau_dev[s][i] - 1) ** 0.5)
+                    
+                    lbl = f"mu {contexts[ind_col]}" if i == 0 else None
+                    lbl2 = f"stationary std {contexts[ind_col]}" if i == 0 else None
+                    plt.hlines(y=val, xmin=q_start, xmax=q_end,
+                            colors=colors[ind_col], linestyles='--', linewidth=0.5, label=lbl)
+                    plt.fill_between(np.linspace(q_start, q_end, self.config_H["N_blocks"]),
+                        val - stationary_std,
+                        val + stationary_std,
+                        color=colors[ind_col], alpha=0.2, label = lbl2)
                 
-                lbl = f"mu {contexts[ind_col]}" if i == 0 else None
-                lbl2 = f"stationary std {contexts[ind_col]}" if i == 0 else None
-                plt.hlines(y=val, xmin=q_start, xmax=q_end,
-                        colors=colors[ind_col], linestyles='--', linewidth=0.5, label=lbl)
-                plt.fill_between(np.linspace(q_start, q_end, self.config_H["N_blocks"]),
-                    val - stationary_std,
-                    val + stationary_std,
-                    color=colors[ind_col], alpha=0.2, label = lbl2)
+        # add observations
+        indices_dev = np.where(run_contexts == 1)
+        indices_dev = indices_dev[0]
+        obs_hz_array = np.array(run_obs)
+        std_data = obs_hz_array.copy().astype(float)
+        std_data[indices_dev] = np.nan
 
+        ax.plot(std_data,label='standard observation', color='darkblue', alpha=0.7,linestyle='None', marker='.', markersize=2)
+        ax.plot(indices_dev, obs_hz_array[indices_dev],color='darkred', label='deviant observation', alpha=0.7,linestyle='None', marker='.', markersize=2)
 
         ax.set_xlabel('tone')
         ax.set_ylabel('state value')
-        ax.set_title(f"linear gaussian dynamics for states of standard and deviant across tones (session training)")
+        ax.set_title(f"linear gaussian dynamics for states of standard and deviant across tones (session {s+1})")
         ax.legend()
         handles, labels = ax.get_legend_handles_labels()
         ax.legend(handles=tau_legend_patches + handles, loc='upper right')
         plt.tight_layout()
-        plt.savefig(f"trial_lists_training/sub-{self.config_H['participant_nr']}/plots/lgd_std_dev_session_training.png", dpi=300, bbox_inches='tight')
+        plt.savefig(f"trial_lists_training/sub-{self.config_H['participant_nr']}/plots/lgd_std_dev_session_{s+1}_{name}.png", dpi=300, bbox_inches='tight')
         #plt.show()
         plt.close()
 
@@ -407,10 +409,7 @@ class trials_master:
                 ax.axvspan(l - 0.5, l + 0.5, color='grey', alpha=0.1)
 
         colors_tau = {
-            tau_std[s][0]: 'black',
-            tau_std[s][1]: 'dimgrey',
-            tau_std[s][2]: 'lightgrey',
-            tau_std[s][3]: 'darkgrey'
+            tau_std[s][0]: 'black'
         }
 
         for k, r in enumerate(tau_std_seq):
@@ -591,7 +590,10 @@ class trials_master:
                 hz_val_erb = self.frequency_transfer(state_d)
                 state_d_hz.append(hz_val_erb)
             
-            self.plot_observations(s, obs_hz, run_contexts, run_rules, tau_std, run_dpos)   
+            print(si_q_arr)
+            self.plot_states(s, run_states_std, run_states_dev, tau_std, tau_dev, run_rules, si_q_arr, si_q_dev_arr, mu_tones, run_obs, run_contexts, name = 'input')
+            self.plot_states(s, state_s_hz, state_d_hz, tau_std, tau_dev, run_rules, si_q_arr, si_q_dev_arr, mu_tones, obs_hz, run_contexts, name = 'hz')
+            self.plot_observations(s, obs_hz, run_contexts, run_rules, tau_std, run_dpos)     
 
             # save session output file to read in for experiment in psychopy
             iti_range = 6# np.arange(7, 12, 0.5) # ITI range (change for fMRI)
@@ -609,8 +611,8 @@ class trials_master:
             trials_final['state_dev'] = run_states_dev
             trials_final['state_std_hz'] = state_s_hz
             trials_final['state_dev_hz'] = state_d_hz
-            trials_final['diff_std'] = trials_final['observation'] - trials_final['state_std_hz']
-            trials_final['diff_dev'] = trials_final['observation'] - trials_final['state_dev_hz']
+            trials_final['diff_std'] = trials_final['frequency'] - trials_final['state_std_hz']
+            trials_final['diff_dev'] = trials_final['frequency'] - trials_final['state_dev_hz']
             
             trials_final['lim_std'] = lim_std_seq
             trials_final['lim_dev'] = lim_dev_seq
@@ -624,6 +626,9 @@ class trials_master:
 
             trials_final['dpos'] = np.repeat(run_dpos, self.config_H["N_tones"])
             trials_final['trial_type'] = run_contexts
+
+            trials_final.loc[trials_final['trial_type'] == 1, 'diff_std'] = np.nan
+            trials_final.loc[trials_final['trial_type'] == 0, 'diff_dev'] = np.nan
 
             trials_final['sigma_q_std'] = np.repeat([x for x in si_q_arr], self.config_H["N_tones"]*self.config_H["N_blocks"])
             trials_final['sigma_q_dev'] = np.repeat([x for x in si_q_dev_arr], self.config_H["N_tones"]*self.config_H["N_blocks"])
@@ -647,7 +652,7 @@ class trials_master:
             
 if __name__ == "__main__":
 
-    subs = ["07","08"]
+    subs = ["07"]
 
     for suby in subs:
     
