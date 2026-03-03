@@ -1,3 +1,4 @@
+import os
 import numpy as np
 import scipy.stats as ss
 import pickle
@@ -77,7 +78,7 @@ class AuditGenerativeModel:
         self.N_tones = params["N_tones"]
 
         # Parallel processing: max_cores controls the number of workers
-        # Set to 1 to disable parallelization, None to use all available cores
+        # None or 1 = sequential (safe default), >1 = parallel with that many workers
         self.max_cores = params.get("max_cores", None)
         
         # Dynamics parameters
@@ -668,6 +669,12 @@ class AuditGenerativeModel:
         list
             Result from generate_run as a list.
         """
+        # Re-seed RNG per worker so that parallel (forked) processes don't
+        # share the same numpy random state and produce identical draws.
+        # Combining os.getpid() with samp_idx ensures uniqueness across
+        # workers and across samples within the same worker.
+        np.random.seed((os.getpid() + samp_idx) % (2**32))
+
         # Override parameters for this sample if testing
         if self.params_testing:
             if self.mu_tau_set is not None:
@@ -732,12 +739,12 @@ class AuditGenerativeModel:
         batch = []
 
         # Determine number of workers
-        if self.max_cores == 1:
-            # Explicitly disabled
-            use_parallel = False
-        elif HAS_PATHOS and N_samples > 1:
+        # max_cores=None (default / unset) → sequential
+        # max_cores=1 → sequential (explicitly disabled)
+        # max_cores>1 → parallel with that many workers (requires pathos)
+        if self.max_cores is not None and self.max_cores > 1 and HAS_PATHOS and N_samples > 1:
             use_parallel = True
-            n_workers = self.max_cores if self.max_cores else min(cpu_count(), N_samples)
+            n_workers = min(self.max_cores, N_samples)
         else:
             use_parallel = False
 
