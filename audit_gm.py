@@ -1216,13 +1216,14 @@ class HierarchicalAuditGM(AuditGenerativeModel):
         plt.show()
 
 
-    def plot_combined_with_matrix(self, x_stds, x_dvts, ys, Cs, rules, dpos, pars, pi_rules=None, text=True):
+    def plot_combined_with_matrix(self, x_stds, x_dvts, ys, Cs, rules, dpos, pars, pi_rules=None, text=True, plot_obs=False, plot_dpos_dist=False):
         """
         Plots plot_contexts_rules_states_obs and plot_rules_dpos as subplots, and pi_rules as a matrix on the side.
+        Includes histograms with KDE of dpos distribution to the right of the dpos plot.
         """
 
-        fig = plt.figure(figsize=(24, 12))
-        gs = gridspec.GridSpec(2, 2, width_ratios=[4, 1], height_ratios=[1, 1])
+        fig = plt.figure(figsize=(26, 12))
+        gs = gridspec.GridSpec(2, 3, width_ratios=[4, 0.8, 1], height_ratios=[1, 1])
 
         # Top subplot: contexts, rules, states, obs
         ax1 = fig.add_subplot(gs[0, 0])
@@ -1230,8 +1231,9 @@ class HierarchicalAuditGM(AuditGenerativeModel):
         ax1.set_ylim(min(np.min(x_stds), np.min(x_dvts), np.min(ys)) - 0.5, max(np.max(x_stds), np.max(x_dvts), np.max(ys)) + 0.5)
         ax1.plot(x_stds, label="x_std", color="blue", marker="o" if text else None, markersize=4, linestyle="-", linewidth=2 if text else 1, alpha=0.9)
         ax1.plot(x_dvts, label="x_dvt", color="red", marker="o" if text else None, markersize=4, linestyle="-", linewidth=2 if text else 1, alpha=0.9)
-        #ax1.plot(ys, label="y", color="green", marker="o" if text else None, markersize=4, linewidth=2 if text else 1, alpha=0.9)
-        ax1.set_ylabel("processes and observations")
+        if plot_obs:
+            ax1.plot(ys, label="y", color="green", marker="o" if text else None, markersize=4, linewidth=2 if text else 1, alpha=0.9)
+        ax1.set_ylabel(f"states processes{'and observations' if plot_obs else ''}")
         if text:
             ax2 = ax1.twinx()
             ax2.plot(Cs, "o", color="black", label="context", markersize=2)
@@ -1272,9 +1274,54 @@ class HierarchicalAuditGM(AuditGenerativeModel):
         if not text:
             ax3.set_xticks(np.arange(0, self.N_blocks + 1, 50))
 
+        if plot_dpos_dist:
+            # Histogram subplot: dpos distributions
+            ax3_hist = fig.add_subplot(gs[1, 1], sharey=ax3)
+            ax3_hist.tick_params(axis='y', labelleft=False)
+            
+            # Prepare data for histograms - filter out None values
+            dpos_array = np.array(dpos)
+            rules_array = np.array(rules)
+            
+            # Filter out None values for KDE calculations (convert to float)
+            dpos_all_clean = np.array([x for x in dpos_array if x is not None], dtype=float)
+            dpos_rule0_clean = np.array([x for i, x in enumerate(dpos_array) if x is not None and rules_array[i] == 0], dtype=float)
+            dpos_rule1_clean = np.array([x for i, x in enumerate(dpos_array) if x is not None and rules_array[i] == 1], dtype=float)
+            
+            # Create histograms with KDE for each group
+            y_range = np.linspace(1, 8, 100)
+            
+            # All dpos histogram
+            if len(dpos_all_clean) > 0:
+                ax3_hist.hist(dpos_all_clean, bins=7, range=(1, 8), orientation='horizontal', alpha=0.3, 
+                            color='gray', label='All', density=True, edgecolor='black', linewidth=0.5, align='mid')
+                if len(dpos_all_clean) > 1:
+                    kde_all = ss.gaussian_kde(dpos_all_clean)
+                    ax3_hist.plot(kde_all(y_range), y_range, color='gray', linewidth=2, linestyle='--', alpha=0.7)
+            
+            # Rule 0 histogram
+            if len(dpos_rule0_clean) > 0:
+                ax3_hist.hist(dpos_rule0_clean, bins=7, range=(1, 8), orientation='horizontal', alpha=0.3, 
+                            color=self.rules_cmap[0], label='Rule 0', density=True, edgecolor='black', linewidth=0.5, align='mid')
+                if len(dpos_rule0_clean) > 1:
+                    kde_rule0 = ss.gaussian_kde(dpos_rule0_clean)
+                    ax3_hist.plot(kde_rule0(y_range), y_range, color=self.rules_cmap[0], linewidth=2)
+            
+            # Rule 1 histogram
+            if len(dpos_rule1_clean) > 0:
+                ax3_hist.hist(dpos_rule1_clean, bins=7, range=(1, 8), orientation='horizontal', alpha=0.3, 
+                            color=self.rules_cmap[1], label='Rule 1', density=True, edgecolor='black', linewidth=0.5, align='mid')
+                if len(dpos_rule1_clean) > 1:
+                    kde_rule1 = ss.gaussian_kde(dpos_rule1_clean)
+                    ax3_hist.plot(kde_rule1(y_range), y_range, color=self.rules_cmap[1], linewidth=2)
+            
+            ax3_hist.set_xlabel("Empirical density")
+            ax3_hist.legend(loc='upper left', fontsize=8)
+            ax3_hist.set_xlim(0, ax3_hist.get_xlim()[1])
+
         # Right subplot: transition matrix pi_rules
         if pi_rules is not None:
-            ax4 = fig.add_subplot(gs[:, 1])
+            ax4 = fig.add_subplot(gs[:, 2])
             im = ax4.imshow(pi_rules, cmap="Blues", vmin=0, vmax=1)
             ax4.set_title("Transition Matrix (pi_rules)")
             ax4.set_xlabel("To rule")
@@ -1296,7 +1343,7 @@ class HierarchicalAuditGM(AuditGenerativeModel):
         fig.suptitle(f"{title_line1}\n{title_line2}", fontsize=12)
 
         plt.tight_layout(rect=[0, 0, 1, 0.95])
-        plt.subplots_adjust(left=0.05, right=0.98, top=0.90, bottom=0.08, wspace=0.25, hspace=0.25)
+        plt.subplots_adjust(left=0.05, right=0.95, top=0.90, bottom=0.08, wspace=0.3, hspace=0.25)
         #plt.show()
 
     def plot_rules_dpos(self, rules, dpos, pars, text=True):
@@ -1348,7 +1395,7 @@ class HierarchicalAuditGM(AuditGenerativeModel):
 
 
 
-def example_HGM(config_H):
+def example_HGM(config_H, plot_obs=False, plot_dpos_dist=False):
     gm = HierarchicalAuditGM(config_H)
 
     if "return_pi_rules" in config_H.keys() and config_H["return_pi_rules"]:
@@ -1368,7 +1415,7 @@ def example_HGM(config_H):
     # Deviant position for each rule
     # gm.plot_rules_dpos(rules, dpos, pars, text=text)
 
-    gm.plot_combined_with_matrix(states[0], states[1], obs, contexts, rules, dpos, pars, pi_rules=pi_rules, text=text)
+    gm.plot_combined_with_matrix(states[0], states[1], obs, contexts, rules, dpos, pars, pi_rules=pi_rules, text=text, plot_obs=plot_obs, plot_dpos_dist=plot_dpos_dist)
 
     # An example of the states and observation sampling for one block
     gm.plot_contexts_states_obs(contexts[0:gm.N_tones], obs[0:gm.N_tones], states[0][0:gm.N_tones], states[1][0:gm.N_tones], gm.N_tones, pars=pars)
@@ -1439,7 +1486,7 @@ if __name__ == "__main__":
         "fix_pi_rules": False,
         "fix_pi_vals": [0.8, 0.1, 0]
     }
-    # example_HGM(config_H)
+    example_HGM(config_H, plot_obs=True, plot_dpos_dist=True)
 
 
     config_H_nullrule = config_H.copy()
@@ -1448,7 +1495,7 @@ if __name__ == "__main__":
     config_H_nullrule["fixed_rule_id"] = 2
     config_H_nullrule["fixed_rule_p"] = 0.1
     config_H_nullrule["rules_cmap"] = {0: "tab:blue", 1: "tab:red", 2: "tab:gray"}
-    example_HGM(config_H_nullrule)
+    example_HGM(config_H_nullrule, plot_obs=True, plot_dpos_dist=True)
     
     # Example non-hierachical GM (no rules, std/dvt)
     config_NH = {
