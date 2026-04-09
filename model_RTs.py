@@ -528,6 +528,7 @@ def compare_likelihoods_with_RTs_global(subjects, trials_path, results_save_path
             
             # Compute likelihoods over rules
             # Note: compute_dev_likelihoods_over_rules expects 0-indexed session, so subtract 1
+            # NOTE: this should be done outside of and before calling this function!!!
             if take_dpos:
                 results_df = compute_dev_likelihoods_over_dpos(trials_file, results_df, sub, sess_num-1)
             if take_rules:
