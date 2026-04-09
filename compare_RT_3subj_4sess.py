@@ -24,4 +24,6 @@ if __name__ == "__main__":
         [0.5, 0.5, 0.0]  
     ])
 
-    compare_likelihoods_with_RTs_global(trials_path, results_save_path, logfiles_path, RT_results_path, pi_rule, take_dpos=True, take_rules=True)
+    subjects = ['04', '05', '06']
+
+    compare_likelihoods_with_RTs_global(subjects, trials_path, results_save_path, logfiles_path, RT_results_path, pi_rule, take_dpos=True, take_rules=True)

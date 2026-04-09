@@ -464,9 +464,9 @@ def compare_likelihoods_with_RTs(results_df, logfiles_path, sub, sess, RT_result
 
 
 
-def compare_likelihoods_with_RTs_global(trials_path, results_save_path, logfiles_path, RT_results_path, pi_rule, take_dpos=True, take_rules=False):
+def compare_likelihoods_with_RTs_global(subjects, trials_path, results_save_path, logfiles_path, RT_results_path, pi_rule, take_dpos=True, take_rules=False):
     """Compare Kalman likelihoods with reaction times from logfiles for multiple subjects and sessions per subject
-    NOTE: so far hard coded for 3 subjects, subjects 04, 05, 06
+    NOTE: so far visualization works best for 3 subjects and 4 sessions
     NOTE:
     - take_dpos and take_rules specify whether the likelihoods also include the deviant location prior (probability that there was a deviant at the deviant 
     location selected, considering that previous observations were standards, see compute_dev_likelihoods_over_dpos and prior_dpos_given_prev_stds), 
@@ -503,7 +503,6 @@ def compare_likelihoods_with_RTs_global(trials_path, results_save_path, logfiles
             session_type_to_params[session_type][sub] = sess_num
     
     session_types = sorted(list(session_types))
-    subjects = ['04', '05', '06'] # TODO: change that, pass as argument for example
     
     fig, axs = plt.subplots(len(subjects), len(session_types), figsize=(12, 10))
     plt.style.context('seaborn-poster')
