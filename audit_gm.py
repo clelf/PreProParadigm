@@ -583,7 +583,7 @@ class AuditGenerativeModel:
 
         ax1.legend(bbox_to_anchor=(1.1, 1))
         plt.tight_layout()
-        plt.show()
+        #plt.show()
 
     def _generate_single_sample(self, samp_idx):
         """Generate one sample, optionally using pre-sampled parameters.
@@ -1144,7 +1144,7 @@ class HierarchicalAuditGM(AuditGenerativeModel):
         ax1.legend(bbox_to_anchor=(1.1, 1))
         plt.tight_layout(rect=[0, 0, 1, 1])
         plt.subplots_adjust(left=0.05, right=0.98, top=0.95, bottom=0.08)
-        plt.show()
+        #plt.show()
 
 
     def plot_combined_with_matrix(self, x_stds, x_dvts, ys, Cs, rules, dpos, pars, pi_rules=None, text=True, plot_obs=False, plot_dpos_dist=False, save_path=None):
@@ -1275,9 +1275,10 @@ class HierarchicalAuditGM(AuditGenerativeModel):
             ax4.set_xticks(np.arange(pi_rules.shape[1]))
             ax4.set_yticks(np.arange(pi_rules.shape[0]))
             # Annotate matrix values
+            #print(pi_rules)
             for i in range(pi_rules.shape[0]):
                 for j in range(pi_rules.shape[1]):
-                    ax4.text(j, i, f"{pi_rules[i, j]:.1f}", ha="center", va="center", color="black")
+                    ax4.text(j, i, f"{pi_rules[i, j]:.2f}", ha="center", va="center", color="black")
 
         # Set figure title
         tau_str = f"std: {pars['tau'][0]:.2f}, dvt: {pars['tau'][1]:.2f}" if self.N_ctx == 2 else f"{pars['tau']:.2f}"
@@ -1293,7 +1294,7 @@ class HierarchicalAuditGM(AuditGenerativeModel):
 
         plt.tight_layout(rect=[0, 0, 1, 0.95])
         plt.subplots_adjust(left=0.05, right=0.98, top=0.90, bottom=0.08, wspace=0.08, hspace=0.3)
-        plt.show()
+        #plt.show()
         if save_path is not None:
             fig.savefig(save_path, dpi=300)
 
@@ -1342,7 +1343,7 @@ class HierarchicalAuditGM(AuditGenerativeModel):
         title_line2 = f"(mu_tau: {self.mu_tau:.2f}, mu_si_stat: {self.si_stat:.2f}, mu_si_q: {self.si_stat * ((2 * self.mu_tau - 1) ** 0.5) / self.mu_tau:.2f}, si_r: {self.si_r:.2f})"
         plt.title(f"{title_line1}\n{title_line2}", y=-0.2)
         fig.tight_layout()
-        plt.show()
+        #plt.show()
 
 
 
@@ -1402,7 +1403,7 @@ def example_single(config_single):
         axs[i].set_title(f"mu_tau = {tau}, tau = {pars['tau']:.2f}")
 
     plt.tight_layout()
-    plt.show()
+    #plt.show()
 
     
 
@@ -1434,7 +1435,7 @@ if __name__ == "__main__":
         "fix_tau_val": [16,2],
         "fix_lim_val": -0.6,
         "fix_d_val": 2,
-        "fix_pi_rules": False,
+        "fix_pi_rules": True,
         "fix_pi_vals": [0.85, 0.15],
         "init": 'N' # TN = initialize from truncated normal truncated at si_stat, TN_3 = truncated at si_stat/3, N = from full normal, MU = initialize as mean
     }
