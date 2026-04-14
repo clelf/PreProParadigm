@@ -71,6 +71,8 @@ class AuditGenerativeModel:
     """
 
     def __init__(self, params):
+
+        self.init = params["init"]
         
         # Samples / sessions parameters
         self.N_samples = params["N_samples"]
