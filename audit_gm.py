@@ -256,13 +256,12 @@ class AuditGenerativeModel:
         return np.random.choice(states_values, p=states_trans_matrix[current_state])
 
     def compute_fixed_pi(self, fixed_pi_vals):
-        """Compute a fixed transition matrix with given diagonal values, for 3 states.
+        """Compute a fixed transition matrix with given diagonal values, for 2 states.
         """
         pi = np.array([
-            [fixed_pi_vals[0], 1 - fixed_pi_vals[0] - fixed_pi_vals[1], fixed_pi_vals[1]],
-            [1 - fixed_pi_vals[0] - fixed_pi_vals[1], fixed_pi_vals[0], fixed_pi_vals[1]],
-            [(1 - fixed_pi_vals[2])/2, (1 - fixed_pi_vals[2])/2, fixed_pi_vals[2]]
-            ])        
+            [fixed_pi_vals[0], 1 - fixed_pi_vals[0]],
+            [1 - fixed_pi_vals[0], fixed_pi_vals[0]]
+            ])  
         
         return pi
 
@@ -448,7 +447,14 @@ class AuditGenerativeModel:
 
         # --- STD process: update at every timestep ---
         # Randomly initialize state for std process at first tone of first block only
-        states[0][0, 0] = self._sample_N_(lim[0], si_stat).item()
+        if self.init == 'N':
+            states[0][0, 0] = self._sample_N_(lim[0], si_stat).item()
+        elif self.init == 'MU':    
+            states[0][0,0] = lim[0]
+        elif self.init == 'TN':    
+            states[0][0, 0] = self._sample_TN_(lim[0]-si_stat, lim[0]+si_stat, lim[0], si_stat).item()
+        elif self.init == 'TN_3':
+            states[0][0, 0] = self._sample_TN_(lim[0]-(si_stat/3), lim[0]+(si_stat/3), lim[0], si_stat).item()  
 
         for b in range(self.N_blocks):
             # Initial state for std process as the last value of the previous block
@@ -463,7 +469,14 @@ class AuditGenerativeModel:
         # --- DVT process: update only at deviant position in each block ---
         if self.N_ctx > 1:
             # Sample the first value around the process' stationary value
-            states[1][0, :] = self._sample_N_(lim[1], si_stat, size=1)
+            if self.init == 'N':
+                states[1][0, :] = self._sample_N_(lim[1], si_stat, size=1)
+            elif self.init == 'MU':    
+                states[1][0,:] = lim[1]
+            elif self.init == 'TN':    
+                states[1][0,:] = self._sample_TN_(lim[1]-si_stat, lim[1]+si_stat, lim[1], si_stat).item()
+            elif self.init == 'TN_3':
+                states[1][0,:] = self._sample_TN_(lim[1]-(si_stat/3), lim[1]+(si_stat/3), lim[1], si_stat).item()
 
             for b in range(1,self.N_blocks):
                 # LGD update at block level: x[b] = x[b-1] + 1/tau * (lim - x[b-1]) + noise
@@ -1420,7 +1433,8 @@ if __name__ == "__main__":
         "fix_lim_val": -0.6,
         "fix_d_val": 2,
         "fix_pi_rules": False,
-        "fix_pi_vals": [0.8, 0.1, 0]
+        "fix_pi_vals": [0.85, 0.15],
+        "init": 'N' # TN = initialize from truncated normal truncated at si_stat, TN_3 = truncated at si_stat/3, N = from full normal, MU = initialize as mean
     }
     example_HGM(config_H, plot_obs=True, plot_dpos_dist=True)
 
