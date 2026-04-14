@@ -44,7 +44,7 @@ class trials_master:
             "mu_d": 2, # unused for experiment
             "return_pi_rules": True,
             "fixed_rule_id": 2,
-            "fixed_rule_p": 0.1,
+            "fixed_rule_p": 0,
             "rules_cmap": {0: "tab:blue", 1: "tab:red", 2: "tab:gray"},
             "fix_process": True, # fix tau, lim, d to input values
             "tau_std_ind": None,
@@ -525,7 +525,7 @@ class trials_master:
                             unbalanced = False
 
                             # plot run using Cléms plotting approach
-                            hgm.plot_combined_with_matrix(states[0], states[1], obs, contexts, rules, dpos, pars, pi_rules=pi_rules, text=False)
+                            hgm.plot_combined_with_matrix(states[0], states[1], obs, contexts, rules, dpos, pars, pi_rules=pi_rules, text=False, plot_dpos_dist=True, save_path = None)
                             fig = plt.gcf() 
                             fig.savefig(f"trial_lists/sub-{self.config_H['participant_nr']}/plots/lgd_std_dev_session_{session_name}_run{r+1}_plot_clem.png", dpi=300, bbox_inches='tight')
                             plt.close()                         
@@ -535,8 +535,8 @@ class trials_master:
 
                             std_rat = pars['si_q'][0]/self.config_H["si_r"]
                             dev_rat = pars['si_q'][1]/self.config_H["si_r"]
-                            print(f" ratio si_q/si_r std run {r+1} = {std_rat}")
-                            print(f" ratio si_q/si_r dev run {r+1} = {dev_rat}")
+                            #print(f" ratio si_q/si_r std run {r+1} = {std_rat}")
+                            #print(f" ratio si_q/si_r dev run {r+1} = {dev_rat}")
 
                             states_std = states[0]
                             states_dev = states[1]
@@ -569,7 +569,7 @@ class trials_master:
                 r2_pos_6 = np.where((np.array(rules) == 1) & (np.array(dpos) == 5))[0]
                 r2_pos_7 = np.where((np.array(rules) == 1) & (np.array(dpos) == 6))[0]
 
-                print(len(r1_pos_3),len(r1_pos_4),len(r1_pos_5),len(r2_pos_5),len(r2_pos_6),len(r2_pos_7))
+                #print(len(r1_pos_3),len(r1_pos_4),len(r1_pos_5),len(r2_pos_5),len(r2_pos_6),len(r2_pos_7))
 
                 if n_cues == 2:
                     cues = np.full(len(rules), 'triangle', dtype=object)
@@ -588,8 +588,8 @@ class trials_master:
                     cues[r1_cue_1] = 'circle'
                     cues[r2_cue_1] = 'circle'  
 
-                    print(r1_cue_1)
-                    print(r2_cue_1)
+                    #print(r1_cue_1)
+                    #print(r2_cue_1)
                 
                 elif n_cues == 3:
 
@@ -597,14 +597,14 @@ class trials_master:
                     
                     val = int((cue_prob*len(cues))/6)
                     inval = int(((1-cue_prob)*len(cues))/6)
-                    print(val,inval)
+                    #print(val,inval)
 
                     np.random.shuffle(r1_pos_3)
                     val1_3 = r1_pos_3[:val]
                     inval1_3 = r1_pos_3[val:val+inval]
                     amb1_3 = r1_pos_3[val+inval:]
 
-                    print(val1_3, inval1_3, amb1_3)
+                    #print(val1_3, inval1_3, amb1_3)
 
                     np.random.shuffle(r1_pos_4)
                     val1_4 = r1_pos_4[:val]
@@ -736,8 +736,8 @@ class trials_master:
             trials_final.loc[trials_final['trial_type'] == 1, 'diff_std'] = np.nan
             trials_final.loc[trials_final['trial_type'] == 0, 'diff_dev'] = np.nan
 
-            print(f"mean observation noise std: {np.nanmean(np.abs((trials_final['diff_std'])))}")
-            print(f"mean observation noise dev: {np.nanmean(np.abs((trials_final['diff_dev'])))}")
+            #print(f"mean observation noise std: {np.nanmean(np.abs((trials_final['diff_std'])))}")
+            #print(f"mean observation noise dev: {np.nanmean(np.abs((trials_final['diff_dev'])))}")
 
             trials_final['sigma_q_std'] = np.repeat([x for x in si_q_arr], self.config_H["N_tones"]*self.config_H["N_blocks"])
             trials_final['sigma_q_dev'] = np.repeat([x for x in si_q_dev_arr], self.config_H["N_tones"]*self.config_H["N_blocks"])
@@ -767,7 +767,7 @@ class trials_master:
             
 if __name__ == "__main__":
     
-    subs = ["10"]
+    subs = ["testest"]
 
     for suby in subs:
 
@@ -778,14 +778,14 @@ if __name__ == "__main__":
                                     [1, 0, 3, 2]])
         
         np.random.shuffle(tau_std_ind_all)
-        print(tau_std_ind_all)
+        #print(tau_std_ind_all)
         
         sessions = [1,2,3,4]
         sign = [[-1,1,-1,1],[1,-1,1,-1],[-1,1,1,-1],[1,-1,-1,1]]
         n_cues = 2
 
         np.random.shuffle(sessions)
-        print(sessions)
+        #print(sessions)
 
         for d in [1,1,1,1]:
             for si_stat in [0.1]:
