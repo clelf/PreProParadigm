@@ -1,5 +1,7 @@
 *.png
 *.pyc
-*docx
 *.docx
 *.csv
+*.tsv
+*.pdf
+*.svg
