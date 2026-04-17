@@ -29,7 +29,7 @@ class trials_master:
             "N_samples": 1,
             "N_blocks": 60, # number of trials
             "N_tones": 8, # number of tones in each trial
-            "rules_dpos_set": [[2, 3, 4], [4, 5, 6], None], # deviant positions per rule
+            "rules_dpos_set": [[2, 3, 4], [4, 5, 6]], # deviant positions per rule
             "mu_tau": 16, # unused for experiment
             "si_tau": 1, # unused for experiment
             "si_lim": 0.2, # unused for experiment
@@ -44,7 +44,7 @@ class trials_master:
             "mu_d": 2, # unused for experiment
             "return_pi_rules": True,
             "fixed_rule_id": 2,
-            "fixed_rule_p": 0.1,
+            "fixed_rule_p": 0,
             "rules_cmap": {0: "tab:blue", 1: "tab:red", 2: "tab:gray"},
             "fix_process": True, # fix tau, lim, d to input values
             "tau_std_ind": None,
@@ -52,11 +52,12 @@ class trials_master:
             "fix_lim_val": -0.6, # lim std
             "fix_d_val": 1, # effect size d
             "fix_pi_rules": True,
-            "fix_pi_vals": [0.8, 0.1, 0], # fixed values to create transition matrix
+            "fix_pi_vals": [0.85, 0.15], # fixed values to create transition matrix
             "n_sessions": 4, # number of sessions
             "n_runs": 4, # number of runs per session
             "isi": 0.65, # inter-stimulus interval
-            "duration_tones": 0.1, # stimulus duration
+            "duration_tones": 0.1, # stimulus duration,
+            "init": 'TN_3', # how to initialize std dev processes
         }
 
     def prep_dirs(self):
@@ -81,6 +82,8 @@ class trials_master:
         target_eigenvect = eigenvects[:,close_to_1_idx]
         target_eigenvect = target_eigenvect[:,0]
         stationary_distrib = target_eigenvect / sum(target_eigenvect)
+
+        #print(f'stationary: {stationary_distrib}')
 
         return stationary_distrib
 
@@ -249,7 +252,7 @@ class trials_master:
             axy[iter, s].grid(True, alpha=0.3)
         
 
-    def plot_kalman(self, figy, axy, n_kalman = [8, 16, 24, 32, 40, 48, 56]): 
+    def plot_kalman(self, figy, axy, session_name, n_kalman = [8, 16, 24, 32, 40, 48, 56]): 
         '''plots kalman results across sessions and n observations'''
 
         # just adding some labels and plot save the full plot across sessions
@@ -272,7 +275,7 @@ class trials_master:
         figy.set_size_inches(25, 12) 
         
         plt.tight_layout()
-        plt.savefig(f"trial_lists/sub-{self.config_H["participant_nr"]}/plots/kalman_results.png", dpi=300, bbox_inches='tight')
+        plt.savefig(f"trial_lists/sub-{self.config_H["participant_nr"]}/plots/kalman_results_session_{session_name}.png", dpi=300, bbox_inches='tight')
         #plt.show() 
         plt.close()  
 
@@ -290,7 +293,7 @@ class trials_master:
 
         return freq_out 
 
-    def plot_states(self, s, std, dev, tau_std, tau_dev, run_rules, si_q_arr, si_q_dev_arr, mu_tones, run_obs, run_contexts, name):
+    def plot_states(self, s, std, dev, tau_std, tau_dev, run_rules, si_q_arr, si_q_dev_arr, mu_tones, run_obs, run_contexts, session_name, name):
         '''plot states for one session'''
 
         contexts = ['std', 'dev']
@@ -378,11 +381,11 @@ class trials_master:
         handles, labels = ax.get_legend_handles_labels()
         ax.legend(handles=tau_legend_patches + handles, loc='upper right')
         plt.tight_layout()
-        plt.savefig(f"trial_lists/sub-{self.config_H['participant_nr']}/plots/lgd_std_dev_session_{s+1}_{name}.png", dpi=300, bbox_inches='tight')
+        plt.savefig(f"trial_lists/sub-{self.config_H['participant_nr']}/plots/lgd_std_dev_session_{session_name}_{name}.png", dpi=300, bbox_inches='tight')
         #plt.show()
         plt.close()
 
-    def plot_observations(self, s, obs_hz, run_contexts, run_rules, tau_std, dpos):
+    def plot_observations(self, s, obs_hz, run_contexts, run_rules, tau_std, dpos, session_name):
         '''plot observations in Hz'''
 
         tau_std_seq = [[tau_std[s][x]]*self.config_H["N_blocks"]*self.config_H["N_tones"] for x in range(len(tau_std[s]))]
@@ -443,11 +446,11 @@ class trials_master:
             plt.text(indices_dev[i], ymax-20, f'{int(dpos_seq_no_zero[i])}', fontsize=6, ha='center', va='bottom')
 
         plt.tight_layout()
-        plt.savefig(f"trial_lists/sub-{self.config_H["participant_nr"]}/plots/observations_std_dev_session_{s+1}.png", dpi=300, bbox_inches='tight')
+        plt.savefig(f"trial_lists/sub-{self.config_H["participant_nr"]}/plots/observations_std_dev_session_{session_name}.png", dpi=300, bbox_inches='tight')
         #plt.show()
         plt.close()
 
-    def generate_sessions(self):
+    def generate_sessions(self, d, sign, session_name, n_cues, cue_prob):
 
         self.prep_dirs()
         mu_tones, taus_all, tau_std, tau_dev = self.define_task_structure()
@@ -460,6 +463,7 @@ class trials_master:
             print(f"Generating session: {session_nr}")
 
             run_rules = []
+            run_cues = []
             run_dpos = []
             run_contexts = []
             run_states_std = []
@@ -474,6 +478,7 @@ class trials_master:
                 # change configuration dict for each run
                 self.config_H["fix_tau_val"] = [tau_std[s][r], tau_std[s][r]/8]
                 self.config_H["fix_lim_val"] = mu_tones[s][r][0]
+                self.config_H["fix_d_val"] = d*sign[session_name-1][r]
 
                 unbalanced = True
 
@@ -486,12 +491,11 @@ class trials_master:
                     # check if rules are balanced
                     p_r1 = sum(rules == 0)/len(rules)
                     p_r2 = sum(rules == 1)/len(rules)
-                    p_r3 = sum(rules == 2)/len(rules)
                     p_rules = np.array([p_r1, p_r2])
 
                     stationary_distrib = self.compute_stationary(pi_rules)
 
-                    if np.any((p_rules < (stationary_distrib[0]-0.02)) | (p_rules > (stationary_distrib[0]+0.02))) or p_r3 < (stationary_distrib[2]-0.02) or p_r3 > (stationary_distrib[2]+0.02): 
+                    if np.any((p_rules < (stationary_distrib[0]-0.02)) | (p_rules > (stationary_distrib[0]+0.02))): 
                         # allow for deviations of max. 2% in both directions from the stationary
                         continue
                     else:
@@ -521,9 +525,9 @@ class trials_master:
                             unbalanced = False
 
                             # plot run using Cléms plotting approach
-                            hgm.plot_combined_with_matrix(states[0], states[1], obs, contexts, rules, dpos, pars, pi_rules=pi_rules, text=False)
+                            hgm.plot_combined_with_matrix(states[0], states[1], obs, contexts, rules, dpos, pars, pi_rules=pi_rules, text=False, plot_dpos_dist=True, save_path = None)
                             fig = plt.gcf() 
-                            fig.savefig(f"trial_lists/sub-{self.config_H['participant_nr']}/plots/lgd_std_dev_session_{s+1}_run{r+1}_plot_clem.png", dpi=300, bbox_inches='tight')
+                            fig.savefig(f"trial_lists/sub-{self.config_H['participant_nr']}/plots/lgd_std_dev_session_{session_name}_run{r+1}_plot_clem.png", dpi=300, bbox_inches='tight')
                             plt.close()                         
                             
                             si_q_arr.append(pars['si_q'][0])
@@ -531,18 +535,113 @@ class trials_master:
 
                             std_rat = pars['si_q'][0]/self.config_H["si_r"]
                             dev_rat = pars['si_q'][1]/self.config_H["si_r"]
-                            print(f" ratio si_q/si_r std run {r+1} = {std_rat}")
-                            print(f" ratio si_q/si_r dev run {r+1} = {dev_rat}")
+                            #print(f" ratio si_q/si_r std run {r+1} = {std_rat}")
+                            #print(f" ratio si_q/si_r dev run {r+1} = {dev_rat}")
 
                             states_std = states[0]
                             states_dev = states[1]
                             mu_tones[s][r][1] = pars['lim'][1]
 
                 # plot probabilities per run
-                self.plot_probabilities(rules, dpos, r+1, f'session_{s+1}_run')
+                self.plot_probabilities(rules, dpos, r+1, f'session_{session_name}_run')
+
+                t_1_1 = 0
+                t_1_2 = 0
+                t_2_1 = 0
+                t_2_2 = 0
+
+                for ru in range(1,len(rules)):
+                    if rules[ru] == 0 and rules[ru-1] == 0:
+                        t_1_1 += 1
+                    elif rules[ru] == 1 and rules[ru-1] == 0:
+                        t_1_2 += 1
+                    elif rules[ru] == 0 and rules[ru-1] == 1:
+                        t_2_1 += 1
+                    elif rules[ru] == 1 and rules[ru-1] == 1:
+                        t_2_2 += 1
+
+                # add probabilistic cues
+                r1_pos_3 = np.where((np.array(rules) == 0) & (np.array(dpos) == 2))[0]
+                r1_pos_4 = np.where((np.array(rules) == 0) & (np.array(dpos) == 3))[0]
+                r1_pos_5 = np.where((np.array(rules) == 0) & (np.array(dpos) == 4))[0]
                 
+                r2_pos_5 = np.where((np.array(rules) == 1) & (np.array(dpos) == 4))[0]
+                r2_pos_6 = np.where((np.array(rules) == 1) & (np.array(dpos) == 5))[0]
+                r2_pos_7 = np.where((np.array(rules) == 1) & (np.array(dpos) == 6))[0]
+
+                #print(len(r1_pos_3),len(r1_pos_4),len(r1_pos_5),len(r2_pos_5),len(r2_pos_6),len(r2_pos_7))
+
+                if n_cues == 2:
+                    cues = np.full(len(rules), 'triangle', dtype=object)
+
+                    r1_cue_pos_3 = np.random.choice(r1_pos_3, size=int(cue_prob*len(r1_pos_3)), replace=False)
+                    r1_cue_pos_4 = np.random.choice(r1_pos_4, size=int(cue_prob*len(r1_pos_4)), replace=False)
+                    r1_cue_pos_5 = np.random.choice(r1_pos_5, size=int(cue_prob*len(r1_pos_5)), replace=False)
+                    
+                    r2_cue_pos_5 = np.random.choice(r2_pos_5, size=int(round((1-cue_prob),2)*len(r2_pos_5)), replace=False)
+                    r2_cue_pos_6 = np.random.choice(r2_pos_6, size=int(round((1-cue_prob),2)*len(r2_pos_6)), replace=False)
+                    r2_cue_pos_7 = np.random.choice(r2_pos_7, size=int(round((1-cue_prob),2)*len(r2_pos_7)), replace=False)
+
+                    r1_cue_1 = np.concatenate([r1_cue_pos_3, r1_cue_pos_4, r1_cue_pos_5])
+                    r2_cue_1 = np.concatenate([r2_cue_pos_5, r2_cue_pos_6, r2_cue_pos_7])
+
+                    cues[r1_cue_1] = 'circle'
+                    cues[r2_cue_1] = 'circle'  
+
+                    #print(r1_cue_1)
+                    #print(r2_cue_1)
+                
+                elif n_cues == 3:
+
+                    cues = np.full(len(rules), 'empty', dtype=object)
+                    
+                    val = int((cue_prob*len(cues))/6)
+                    inval = int(((1-cue_prob)*len(cues))/6)
+                    #print(val,inval)
+
+                    np.random.shuffle(r1_pos_3)
+                    val1_3 = r1_pos_3[:val]
+                    inval1_3 = r1_pos_3[val:val+inval]
+                    amb1_3 = r1_pos_3[val+inval:]
+
+                    #print(val1_3, inval1_3, amb1_3)
+
+                    np.random.shuffle(r1_pos_4)
+                    val1_4 = r1_pos_4[:val]
+                    inval1_4 = r1_pos_4[val:val+inval]
+                    amb1_4 = r1_pos_4[val+inval:]
+
+                    np.random.shuffle(r1_pos_5)
+                    val1_5 = r1_pos_5[:val]
+                    inval1_5 = r1_pos_5[val:val+inval]
+                    amb1_5 = r1_pos_5[val+inval:]
+
+                    np.random.shuffle(r2_pos_5)
+                    val2_5 = r2_pos_5[:val]
+                    inval2_5 = r2_pos_5[val:val+inval]
+                    amb2_5 = r2_pos_5[val+inval:]
+
+                    np.random.shuffle(r2_pos_6)
+                    val2_6 = r2_pos_6[:val]
+                    inval2_6 = r2_pos_6[val:val+inval]
+                    amb2_6 = r2_pos_6[val+inval:]
+
+                    np.random.shuffle(r2_pos_7)
+                    val2_7 = r2_pos_7[:val]
+                    inval2_7 = r2_pos_7[val:val+inval]
+                    amb2_7 = r2_pos_7[val+inval:]
+
+                    circle = np.concatenate([val1_3, val1_4, val1_5, inval2_5, inval2_6, inval2_7])
+                    triangle = np.concatenate([inval1_3, inval1_4, inval1_5, val2_5, val2_6, val2_7])
+                    square = np.concatenate([amb1_3,amb1_4,amb1_5,amb2_5,amb2_6,amb2_7])
+
+                    cues[circle] = 'circle'
+                    cues[triangle] = 'triangle'
+                    cues[square] = 'square'        
+
                 # collect data across runs
                 run_rules.append(rules)
+                run_cues.append(cues)
                 run_dpos.append(dpos)
                 run_contexts.append(contexts)
                 run_states_std.append(states_std)
@@ -553,13 +652,16 @@ class trials_master:
             run_rules = np.concatenate(run_rules)
             rules_long = np.repeat(run_rules, self.config_H["N_tones"])
 
+            run_cues = np.concatenate(run_cues)
+            cues_long = np.repeat(run_cues, self.config_H["N_tones"])
+
             run_dpos = np.concatenate(run_dpos)
             run_contexts = np.concatenate(run_contexts)
             run_states_std = np.concatenate(run_states_std)
             run_states_dev = np.concatenate(run_states_dev)
             run_obs = np.concatenate(run_obs) 
 
-            self.plot_probabilities(run_rules, run_dpos, s+1, 'overall_session')
+            self.plot_probabilities(run_rules, run_dpos, session_name, 'overall_session')
 
             # generate some variables for output file
             tau_std_seq = [[tau_std[s][x]]*self.config_H["N_blocks"]*self.config_H["N_tones"] for x in range(len(tau_std[s]))]
@@ -594,12 +696,12 @@ class trials_master:
                 state_d_hz.append(hz_val_erb)
 
             # plot states for each full session
-            self.plot_states(s, run_states_std, run_states_dev, tau_std, tau_dev, run_rules, si_q_arr, si_q_dev_arr, mu_tones, run_obs, run_contexts, name = 'input')
-            self.plot_states(s, state_s_hz, state_d_hz, tau_std, tau_dev, run_rules, si_q_arr, si_q_dev_arr, mu_tones, obs_hz, run_contexts, name = 'hz')
-            self.plot_observations(s, obs_hz, run_contexts, run_rules, tau_std, run_dpos)   
+            self.plot_states(s, run_states_std, run_states_dev, tau_std, tau_dev, run_rules, si_q_arr, si_q_dev_arr, mu_tones, run_obs, run_contexts, session_name, name = 'input')
+            self.plot_states(s, state_s_hz, state_d_hz, tau_std, tau_dev, run_rules, si_q_arr, si_q_dev_arr, mu_tones, obs_hz, run_contexts, session_name, name = 'hz')
+            self.plot_observations(s, obs_hz, run_contexts, run_rules, tau_std, run_dpos, session_name)   
 
             # save session output file to read in for experiment in psychopy
-            iti_range = 6# np.arange(7, 12, 0.5) # ITI range (change for fMRI)
+            iti_range = 4# np.arange(7, 12, 0.5) # ITI range (change for fMRI)
             ITI =[]
 
             for i in range(0,len(run_dpos)):
@@ -626,6 +728,7 @@ class trials_master:
             trials_final['d'] = np.repeat(self.config_H["fix_d_val"], self.config_H["N_tones"]*self.config_H["N_blocks"]*self.config_H["n_runs"])
 
             trials_final['rule'] = rules_long
+            trials_final['cue'] = cues_long
 
             trials_final['dpos'] = np.repeat(run_dpos, self.config_H["N_tones"])
             trials_final['trial_type'] = run_contexts
@@ -633,8 +736,8 @@ class trials_master:
             trials_final.loc[trials_final['trial_type'] == 1, 'diff_std'] = np.nan
             trials_final.loc[trials_final['trial_type'] == 0, 'diff_dev'] = np.nan
 
-            print(f"mean observation noise std: {np.nanmean(np.abs((trials_final['diff_std'])))}")
-            print(f"mean observation noise dev: {np.nanmean(np.abs((trials_final['diff_dev'])))}")
+            #print(f"mean observation noise std: {np.nanmean(np.abs((trials_final['diff_std'])))}")
+            #print(f"mean observation noise dev: {np.nanmean(np.abs((trials_final['diff_dev'])))}")
 
             trials_final['sigma_q_std'] = np.repeat([x for x in si_q_arr], self.config_H["N_tones"]*self.config_H["N_blocks"])
             trials_final['sigma_q_dev'] = np.repeat([x for x in si_q_dev_arr], self.config_H["N_tones"]*self.config_H["N_blocks"])
@@ -648,17 +751,23 @@ class trials_master:
             trials_final['run_n'] = np.repeat([range(0,len(tau_std[s]))], self.config_H["N_blocks"]*self.config_H["N_tones"])
             trials_final['session_n'] = [s]*self.config_H["N_blocks"]*self.config_H["N_tones"]*len(tau_std[s])
 
-            trials_final.to_csv(f'trial_lists/sub-{self.config_H['participant_nr']}/sub-{self.config_H['participant_nr']}_ses-{session_nr}_trials.csv', index=False, float_format="%.4f")
+            trials_final.to_csv(f'trial_lists/sub-{self.config_H['participant_nr']}/sub-{self.config_H['participant_nr']}_ses-{session_name}_trials.csv', index=False, float_format="%.4f")
 
             session_duration = ((((self.config_H["N_tones"]-1)*self.config_H["isi"])+(self.config_H["N_tones"]*self.config_H["duration_tones"]))*self.config_H["N_blocks"]*(len(tau_std[s]))) + sum(trials_final['ITI'][::8])
             print(f'Estimated session duration in minutes: {session_duration/60}')
 
+            for r in range(0, self.config_H["n_runs"]):
+
+                trials_run = trials_final.loc[trials_final['run_n']==r]
+                trials_run.to_csv(f'trial_lists/sub-{self.config_H['participant_nr']}/sub-{self.config_H['participant_nr']}_ses-{session_name}_run-{r+1}_trials.csv', index=False, float_format="%.4f")
+
+
         # plot Kalman results across all sessions
-        self.plot_kalman(figy, axy, n_kalman = [8, 16, 24, 32, 40, 48, 56])        
+        self.plot_kalman(figy, axy, session_name, n_kalman = [8, 16, 24, 32, 40, 48, 56])        
             
 if __name__ == "__main__":
     
-    subs = ["07"]
+    subs = ["testest"]
 
     for suby in subs:
 
@@ -667,32 +776,40 @@ if __name__ == "__main__":
                                     [3, 2, 1, 0],
                                     [2, 3, 0, 1],
                                     [1, 0, 3, 2]])
-        np.random.shuffle(tau_std_ind_all)
-        print(tau_std_ind_all)
         
-        sessions = [1,2]
-        np.random.shuffle(sessions)
-        print(sessions)
+        np.random.shuffle(tau_std_ind_all)
+        #print(tau_std_ind_all)
+        
+        sessions = [1,2,3,4]
+        sign = [[-1,1,-1,1],[1,-1,1,-1],[-1,1,1,-1],[1,-1,-1,1]]
+        n_cues = 2
 
-        for d in [0.9]:
+        np.random.shuffle(sessions)
+        #print(sessions)
+
+        for d in [1,1,1,1]:
             for si_stat in [0.1]:
-                for si_r_rat in [5,3]:
+                for si_r_rat in [5]:
+
+                    init = 'TN_3'
 
                     print(f"=== Generating Trials with d = {d}, si_stat = {si_stat}, si_r = {si_stat/si_r_rat}  ===")
                     
                     cnt+= 1
+                    session_name = cnt+1
 
                     task = trials_master()
-                    task.config_H["participant_nr"] = f"{suby}-ses-{sessions[cnt]}-d{d}-si_stat{si_stat}-si_r{round(si_stat/si_r_rat, 3)}"
+                    task.config_H["participant_nr"] = f"{suby}"
                     task.config_H["tau_std_ind"] = np.array([tau_std_ind_all[cnt]])
-                    task.config_H["fix_d_val"] = d
+                    #task.config_H["fix_d_val"] = d
                     task.config_H["si_stat"] = si_stat
                     task.config_H["si_r"] = si_stat/si_r_rat
                     task.config_H["n_sessions"] = 1
+                    task.config_H["init"] = init
 
                     start = time.time()
                     print("=== Generating Trials ===")
-                    task.generate_sessions() 
+                    task.generate_sessions(d, sign, session_name, n_cues, cue_prob = 0.8) 
                     end = time.time()
                     print(f"=== Total Run Time Script: {(end-start)/60} ===")
            
