@@ -32,9 +32,17 @@ else:
 def prepare_trials_data(trials_path, exclude_null=False):
     # Load generated sequences
     trials = pd.read_csv(trials_path)
+    
+    # Standardize trial indexing: rename 'trial_n' to 'trial_no' if it exists
+    if 'trial_n' in trials.columns and 'trial_no' not in trials.columns:
+        trials.rename(columns={'trial_n': 'trial_no'}, inplace=True)
+    
     trials['dpos'] = trials['dpos'].fillna(0).astype(int)
     n_trials = len(trials)/8
-    trials['trial_no'] = np.repeat(np.arange(int(n_trials)), 8) # 0 to n_trials-1 for each run
+    # If trial_no doesn't exist yet, create it; otherwise keep the loaded one
+    if 'trial_no' not in trials.columns:
+        trials['trial_no'] = np.repeat(np.arange(int(n_trials)), 8) # 0 to n_trials-1 for each run
+    
     trials['relative_pos'] = np.tile(np.arange(8), int(n_trials)) # 1 to 8 for each run, to match dpos indexing
     if exclude_null:
         trials = trials[trials['dpos'] != 0].reset_index(drop=True)
@@ -46,7 +54,13 @@ def prepare_trials_data(trials_path, exclude_null=False):
     return trials
 
 
-def compute_likelihoods_at_deviants(trials_path, sub, sess, results_save_path=None):
+def compute_predictions():
+    pass
+
+def compute_likelihoods():
+    pass
+
+def compute_likelihoods_at_deviants(trials_path, sub, sess, results_save_path=None, observation_noise=None):
     """
     Compute Kalman filter predictions, and predictions & likelihoods at deviant positions.
     
@@ -55,6 +69,7 @@ def compute_likelihoods_at_deviants(trials_path, sub, sess, results_save_path=No
         sub: Subject identifier
         sess: Session number (1-indexed)
         results_save_path: Path to save results. If None, saves in script directory.
+        observation_noise: Optional fixed observation noise value. If None, EM estimates it.
     """
     if results_save_path is None:
         results_save_path = os.path.dirname(__file__)
@@ -72,7 +87,8 @@ def compute_likelihoods_at_deviants(trials_path, sub, sess, results_save_path=No
         'mu_pred_std': [],
         'sigma_pred_std': [],
         'mu_pred_dev': [],
-        'sigma_pred_dev': []
+        'sigma_pred_dev': [],
+        'trial_no': []
     }
 
     # Prepare storage for predictions and likelihoods at deviant position across runs
@@ -83,7 +99,8 @@ def compute_likelihoods_at_deviants(trials_path, sub, sess, results_save_path=No
         'sigma_pred_dev_at_dev': [],
         'likelihood_obs_std_at_dev': [],
         'likelihood_obs_dev_at_dev': [],
-        'dpos': []
+        'dpos': [],
+        'trial_no': []
     }
 
     # Separate into runs
@@ -104,12 +121,12 @@ def compute_likelihoods_at_deviants(trials_path, sub, sess, results_save_path=No
         # Run multirule-multicontext KF
         # So far just run multi-context KF:
         mu_pred, sigma_pred, kfs_fitted, per_ctx_mu_pred, per_ctx_sigma_pred = kalman_online_fit_predict_multicontext(
-            observations, ctx_probabilities, n_iter=5, return_per_ctx=True
+            observations, ctx_probabilities, n_iter=5, return_per_ctx=True, observation_noise=observation_noise
         )
 
         # Save predictions:
         results['run_id'].append(np.full(len(mu_pred), run_id))
-        results['trial_n'].append(run['trial_n'])
+        results['trial_no'].append(run['trial_no'])
         results['mu_pred'].append(mu_pred)
         results['sigma_pred'].append(sigma_pred)
         results['mu_pred_std'].append(per_ctx_mu_pred[:, 0])
@@ -144,7 +161,7 @@ def compute_likelihoods_at_deviants(trials_path, sub, sess, results_save_path=No
         )
 
         # Store likelihood at t = dpos results for this run
-        results_devpos['trial_n'].append(run['trial_n'].values)
+        results_devpos['trial_no'].append(run['trial_no'][contexts].values) # TODO: verify if correct
         results_devpos['mu_pred_std_at_dev'].append(mu_pred_std_at_dev)
         results_devpos['sigma_pred_std_at_dev'].append(sigma_pred_std_at_dev)
         results_devpos['mu_pred_dev_at_dev'].append(mu_pred_dev_at_dev)
@@ -158,13 +175,17 @@ def compute_likelihoods_at_deviants(trials_path, sub, sess, results_save_path=No
     results = pd.DataFrame({
         k: np.concatenate(v) for k, v in results.items()
     })
-    results.to_csv(os.path.join(results_save_path, f'kalman_predictions_sub-{sub}_ses-{sess}.csv'), index=False)
+    
+    # Generate filename suffix based on observation noise
+    noise_suffix = "" if observation_noise is None else f"_obs_noise_{observation_noise}"
+    
+    results.to_csv(os.path.join(results_save_path, f'kalman_predictions_sub-{sub}_ses-{sess}{noise_suffix}.csv'), index=False)
 
     # Predictions and likelihoods at deviant locations
     results_devpos = pd.DataFrame({
         k: np.concatenate(v) for k, v in results_devpos.items()
     })
-    results_devpos.to_csv(os.path.join(results_save_path, f'kalman_predictions_and_likelihoods_at_deviants_sub-{sub}_ses-{sess}.csv'), index=False)
+    results_devpos.to_csv(os.path.join(results_save_path, f'kalman_predictions_and_likelihoods_at_deviants_sub-{sub}_ses-{sess}{noise_suffix}.csv'), index=False)
 
 
 def get_valid_positions_per_rule():
@@ -303,7 +324,7 @@ def compute_dev_likelihoods_over_rules(trials_path, results_df, sub, sess, pi_ru
     trials = prepare_trials_data(trials_path)
     if "prev_rule" not in trials.columns or "proba_dpos" not in trials.columns:
         # Identify previous rule for each trial (not just read rule from previous row but rule associated with previous n_trial row)
-        trials['prev_rule'] = (trials['trial_n'] - 1).map(dict(zip(trials['trial_n'], trials['rule']))).astype('Int64')
+        trials['prev_rule'] = (trials['trial_no'] - 1).map(dict(zip(trials['trial_no'], trials['rule']))).astype('Int64')
         
         # For all deviant positions in trials, compute prior_dpos(dpos, pi_rule, previous_rule)
         trials['prior_dpos_rules_dev'] = trials.apply(lambda row: pior_dpos_given_prev_rule_and_stds(row['relative_pos'], pi_rule, row['prev_rule']) if pd.notna(row['prev_rule']) else np.nan, axis=1)
@@ -330,7 +351,7 @@ def compute_dev_likelihoods_over_rules(trials_path, results_df, sub, sess, pi_ru
 
 
     # Multiply prior_dpos with (1-results_df['likelihood_obs_std_at_dev'])
-    # results_df['likelihood_obs_dev_at_dev_over_rules'] = (1 - results_df['likelihood_obs_std_at_dev']) * trials[trials['dpos'] != 0][['trial_n', 'dpos', 'prior_dpos_dev']].drop_duplicates()['prior_dpos_dev'].reset_index(drop=True) # This was probably inaccurate
+    # results_df['likelihood_obs_dev_at_dev_over_rules'] = (1 - results_df['likelihood_obs_std_at_dev']) * trials[trials['dpos'] != 0][['trial_no', 'dpos', 'prior_dpos_dev']].drop_duplicates()['prior_dpos_dev'].reset_index(drop=True) # This was probably inaccurate
     results_df['likelihood_obs_std_at_dev_over_rules'] = results_df['likelihood_obs_std_at_dev'] * results_df['prior_dpos_rules_std']
     
     if inplace:
@@ -384,13 +405,13 @@ def load_logs(logfiles_path, sub, sess, filter=False, n_run=4):
     rt_col = 'rt_getsecs_dev' if 'rt_getsecs_dev' in logs.columns else 'rt_getsecs'
     logs.rename(columns={rt_col: 'rt'}, inplace=True)
 
+    # get rid of dpos = 0 to match the likelihoods
+    logs = logs[logs['dpos'] != 0]
+    
     if filter:
-        # get rid of dpos = 0 to match the likelihoods
-        logs = logs[logs['dpos'] != 0]
-        
         # Get rid of NaN and null RT values
         logs = logs.dropna(subset=['rt'])
-        logs = logs[logs[rt_col] >= 0]
+        logs = logs[logs['rt'] >= 0]
 
     # Only keep relevant columns
     relevant_columns = ['trial_no', 'dpos', 'rule', 'runs', 'correct', 'confidence', 'rt']  # Add other relevant columns as needed
@@ -480,22 +501,34 @@ def compare_likelihoods_with_RTs(results_df, logfiles_path, sub, sess, RT_result
     print(f"RT comparison plots saved to: {RT_results_path}")
 
 
-def aggregate_data(trials_path, logfiles_path, subject, session_num, likelihoods_path=None, pi_rule=None):
+def aggregate_data(trials_path, logfiles_path, subject, session_num, likelihoods_path=None, pi_rule=None, obs_noise=None):
+    """This function merges trials info (observations and parameters), Kalman filter predictions and likelihoods,
+    and behavioral data (logfiles) for a specific subject and session.
+    NOTE: results df shows data for deviant positions only
+    """
+
     trials_file = glob.glob(f"{trials_path}/sub-{subject}/sub-{subject}_ses-{session_num}-*trials.csv")[0]
     trials = prepare_trials_data(trials_file)
-    
+   
     if likelihoods_path is not None and pi_rule is not None:
         preds = pd.read_csv(
-            os.path.join(likelihoods_path, f'kalman_predictions_sub-{subject}_ses-{session_num}.csv'), 
+            os.path.join(likelihoods_path, f'kalman_predictions_sub-{subject}_ses-{session_num}{f"_obs_noise_{obs_noise}" if obs_noise is not None else ""}.csv'), 
             index_col=False
         )
         preds_liks_dev = pd.read_csv(
-            os.path.join(likelihoods_path, f'kalman_predictions_and_likelihoods_at_deviants_sub-{subject}_ses-{session_num}.csv'),
+            os.path.join(likelihoods_path, f'kalman_predictions_and_likelihoods_at_deviants_sub-{subject}_ses-{session_num}{f"_obs_noise_{obs_noise}" if obs_noise is not None else ""}.csv'),
             index_col=False
         )
         preds_liks_dev = compute_dev_likelihoods_over_dpos(trials_file, preds_liks_dev, subject, session_num)
         preds_liks_dev = compute_dev_likelihoods_over_rules(trials_file, preds_liks_dev, subject, session_num, pi_rule, results_save_path=None, inplace=False)
         # length: 220
+
+        # When merging by index, keep a single copy of shared identifiers.
+        # `trials` already has `trial_no`, and `preds`/`preds_liks_dev` also contain it.
+        # If we keep multiple copies, later merges will attempt to suffix into names
+        # like `trial_no_x` that may already exist, triggering a MergeError.
+        preds = preds.drop(columns=['trial_no'])
+        preds_liks_dev = preds_liks_dev.drop(columns=['trial_no'])
 
     logs = load_logs(logfiles_path, subject, session_num, filter=False, n_run=4)
     # mask = ~np.isnan(losad) & ~np.isnan(rt) & (rt>=0)
@@ -507,7 +540,7 @@ def aggregate_data(trials_path, logfiles_path, subject, session_num, likelihoods
     # Drop duplicate columns
     cols = logs.columns.difference(df_trials_preds.columns)
     df_all = pd.merge(df_trials_preds[df_trials_preds['contexts']==True].reset_index(drop=True), logs[cols], left_index=True, right_index=True)  
-    
+    df_all = pd.merge(df_all, preds_liks_dev.drop(columns=['dpos', 'rule']), left_index=True, right_index=True)
     # Futher filter: keep RTs >= 0 and not NaN, and corresponding likelihoods not NaN
 
     return df_all
@@ -527,7 +560,7 @@ def get_session_types(trials_path):
         storing subjects IDs associated to them and at what session numbers
     """
 
-    # Discover unique session types (configurations of d, si_stat, si_r)
+    # Find unique session types (configurations of d, si_stat, si_r)
     all_trial_files = glob.glob(f"{trials_path}/sub-*/sub-*_ses-*-*trials.csv")
     session_types = set()
     session_type_to_params = {}  # Map from (d, si_stat, si_r) to dict of {subject: session_number}
@@ -555,10 +588,11 @@ def get_session_types(trials_path):
             session_type_to_params[session_type][sub] = sess_num
     
     session_types = sorted(list(session_types))
+    
     return session_types, session_type_to_params
 
 
-def compare_likelihoods_with_RTs_global(subjects, trials_path, results_save_path, logfiles_path, RT_results_path, pi_rule, take_dpos=True, take_rules=False):
+def compare_likelihoods_with_RTs_global(subjects, trials_path, preds_liks_path, logfiles_path, comparison_save_path, pi_rule, take_dpos=True, take_rules=False, obs_noise=None):
     """Compare Kalman likelihoods with reaction times from logfiles for multiple subjects and sessions per subject
     NOTE: so far visualization works best for 3 subjects and 4 sessions
     NOTE:
@@ -568,35 +602,8 @@ def compare_likelihoods_with_RTs_global(subjects, trials_path, results_save_path
     - take_dpos is True by default, meaning we're interested in taking prior about deviants by default, and take_rules shows likelihoods given prior location given prior rule as a comparison (optional)
     """
 
-
-    # Discover unique session types (configurations of d, si_stat, si_r)
-    all_trial_files = glob.glob(f"{trials_path}/sub-*/sub-*_ses-*-*trials.csv")
-    session_types = set()
-    session_type_to_params = {}  # Map from (d, si_stat, si_r) to dict of {subject: session_number}
-    
-    for trial_file in all_trial_files:
-        filename = os.path.basename(trial_file)
-        
-        # Extract session type parameters
-        param_match = re.search(r'-d(\d+)-si_stat([\d.]+)-si_r([\d.]+)', filename)
-        # Extract subject and session number from filename
-        sub_match = re.search(r'sub-(\d+)_ses-(\d+)', filename)
-        
-        if param_match and sub_match:
-            d = int(param_match.group(1))
-            si_stat = float(param_match.group(2))
-            si_r = float(param_match.group(3))
-            session_type = (d, si_stat, si_r)
-            
-            sub = sub_match.group(1)
-            sess_num = int(sub_match.group(2))  # 1-indexed session number from filename
-            
-            session_types.add(session_type)
-            if session_type not in session_type_to_params:
-                session_type_to_params[session_type] = {}
-            session_type_to_params[session_type][sub] = sess_num
-    
-    session_types = sorted(list(session_types))
+    # Find unique session types (configurations of d, si_stat, si_r)
+    session_types, session_type_to_params = get_session_types(trials_path)
     
     fig, axs = plt.subplots(len(subjects), len(session_types), figsize=(12, 10), sharex=True, sharey=True)
     plt.style.context('seaborn-poster')
@@ -613,50 +620,26 @@ def compare_likelihoods_with_RTs_global(subjects, trials_path, results_save_path
             
             sess_num = session_type_to_params[session_type][sub]  # 1-indexed session number
             
-            results_df = pd.read_csv(
-                os.path.join(results_save_path, f'kalman_predictions_and_likelihoods_at_deviants_sub-{sub}_ses-{sess_num}.csv'),
-                index_col=False
-            )
-            trials_file = glob.glob(f"{trials_path}/sub-{sub}/sub-{sub}_ses-{sess_num}-*trials.csv")[0]
-            
-            # Compute likelihoods over rules
-            # NOTE: this should be done outside of and before calling this function!!!
-            if take_dpos:
-                results_df = compute_dev_likelihoods_over_dpos(trials_file, results_df, sub, sess_num)
-            if take_rules:
-                results_df = compute_dev_likelihoods_over_rules(trials_file, results_df, sub, sess_num, pi_rule, results_save_path=results_save_path, inplace=False)
-
-            rt = load_log_RTs(logfiles_path, sub, sess_num, n_run=4)
-
             # transform to array and mask out nans, also mask negative RTs
-            if take_dpos:
-                losad = np.array(results_df['likelihood_obs_std_at_dev_over_dpos'])
-            else:
-                losad = np.array(results_df['likelihood_obs_std_at_dev'])
-            rt = np.array(rt)
-            mask = ~np.isnan(losad) & ~np.isnan(rt) & (rt>=0)
-            losad_clean = losad[mask]
-            rt_clean = rt[mask]
-
+            df_all = aggregate_data(trials_path, logfiles_path, sub, sess_num, preds_liks_path, pi_rule, obs_noise=obs_noise) # dpos=0 are ALSO filtered out here
+            lik_col = 'likelihood_obs_std_at_dev_over_dpos' if take_dpos else 'likelihood_obs_std_at_dev'
+            df_filtered = df_all[~np.isnan(df_all[lik_col]) & ~np.isnan(df_all['rt']) & (df_all['rt'] >= 0)].reset_index(drop=True)
+            
             # plot association RT with likelihood_obs_std_at_dev
-            axs[i,j].scatter(losad_clean, rt_clean, color=sns.color_palette("Paired")[0])
-            slope, intercept = np.polyfit(losad_clean, rt_clean, 1)
-            corr = ss.pearsonr(losad_clean, rt_clean)
-            axs[i,j].plot(losad_clean, slope * losad_clean + intercept, 
-                     color=sns.color_palette("Paired")[1], linewidth=2,
-                     label=rf"$\rho$: {corr[0]:.2f}, p: {corr[1]:.1g}")  # regression line
+            corr = ss.pearsonr(df_filtered[lik_col], df_filtered['rt'])
+            sns.regplot(df_filtered, x=lik_col, y='rt', scatter=True, ax=axs[i,j],
+                        color=sns.color_palette("Paired")[0],
+                        line_kws={'color': sns.color_palette("Paired")[1], 'linewidth': 2, 
+                                'label':rf"$\rho$: {corr[0]:.2f}, p: {corr[1]:.1g}"})
 
             # Plot rules
-            if take_rules:
-                lor = np.array(results_df['likelihood_obs_std_at_dev_over_rules'])
-                mask = ~np.isnan(lor) & ~np.isnan(rt) & (rt>=0)
-                lor_clean = lor[mask]
-                rt_clean = rt[mask]
-                axs[i,j].scatter(lor_clean, rt_clean, color=sns.color_palette("Paired")[2])
-                slope, intercept = np.polyfit(lor_clean, rt_clean, 1)
-                corr_or = ss.pearsonr(lor_clean, rt_clean)
-                axs[i,j].plot(lor_clean, slope * lor_clean + intercept, color=sns.color_palette("Paired")[3], linewidth=2,
-                        label=rf"$\rho$: {corr_or[0]:.2f}, p: {corr_or[1]:.1g}")
+            if take_rules:                
+                df_filtered_rules = df_filtered[~np.isnan(df_filtered['likelihood_obs_std_at_dev_over_rules'])].reset_index(drop=True)
+                corr_or = ss.pearsonr(df_filtered_rules['likelihood_obs_std_at_dev_over_rules'], df_filtered_rules['rt'])
+                sns.regplot(df_filtered_rules, x='likelihood_obs_std_at_dev_over_rules', y='rt', scatter=True, ax=axs[i,j],
+                            color=sns.color_palette("Paired")[2],
+                            line_kws={'color': sns.color_palette("Paired")[3], 'linewidth': 2,
+                                      'label': rf"$\rho$: {corr_or[0]:.2f}, p: {corr_or[1]:.1g}"})
             
             axs[i, j].set_xlabel("likelihood", fontsize=12)
             # Set ylabel as "RT" for all plots, but handle first column separately
@@ -672,10 +655,10 @@ def compare_likelihoods_with_RTs_global(subjects, trials_path, results_save_path
     
     # Add subject labels as text on the left side and RT labels for first column
     subject_labels = [f"Subject {subj}" for subj in subjects] # NOTE: this is for publication ['Subject 1', 'Subject 2', 'Subject 3']
-    for i, ax in enumerate(axs[:, 0]):
+    for k, ax in enumerate(axs[:, 0]):
         ax.set_ylabel("RT (s)", fontsize=12, rotation=90, labelpad=6, va='center')
         # Add subject label to the left of the plot using figure coordinates
-        fig.text(0.042, ax.get_position().y0 + ax.get_position().height/2, subject_labels[i], 
+        fig.text(0.042, ax.get_position().y0 + ax.get_position().height/2, subject_labels[k], 
                 fontsize=16, rotation=90, va='center', ha='right', weight='normal')
 
     if take_rules:
@@ -685,9 +668,32 @@ def compare_likelihoods_with_RTs_global(subjects, trials_path, results_save_path
         fig.legend(custom_lines, ['without rules', 'with rules'], loc='lower center', ncol=2, 
                 bbox_to_anchor=(0.5, 0.02), fontsize=11)
 
+    if obs_noise is not None:
+        plt.suptitle(f"Obs noise: {obs_noise}", fontsize=18, y=1.02)
+
     plt.tight_layout(rect=[0.05, 0.05, 1, 1])
     plt.subplots_adjust(wspace=0.2, hspace=0.3)
-    plt.savefig(f"{RT_results_path}/RT_3sub_4sess{'_with_rules' if take_rules else ''}_sharexy.png", dpi=600)
+    save_name = f"{comparison_save_path}/RT_3sub_4sess{'_with_rules' if take_rules else ''}_obsnoise-{obs_noise}.png"
+    plt.savefig(save_name, dpi=600)
+    print(f"Saved fig as {save_name}")
+
+
+def run_KF_sub_sess(subject, session_num, trials_path, kf_preds_save_path):
+    trials = prepare_trials_data(trials_path)
+    compute_likelihoods_at_deviants(trials_path, subject, session_num, results_save_path=kf_preds_save_path)
+
+
+def run_KF_all(subjects, trials_path, kf_preds_save_path):
+    # Find unique session types (configurations of d, si_stat, si_r)
+    session_types, session_type_to_params = get_session_types(trials_path)
+    
+    for sub in tqdm(subjects, desc="Subject"):
+        for session_type in tqdm(session_types, desc="Session Type"):
+            sess_num = session_type_to_params[session_type][sub]  # 1-indexed session number
+            trials_file = glob.glob(f"{trials_path}/sub-{sub}/sub-{sub}_ses-{sess_num}-*trials.csv")[0]
+            run_KF_sub_sess(sub, sess_num, trials_file, kf_preds_save_path)
+
+
 
 
 if __name__ == "__main__":
