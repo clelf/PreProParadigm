@@ -71,9 +71,13 @@ class AuditGenerativeModel:
     """
 
     def __init__(self, params):
-
-        self.init = params["init"]
         
+        # States initialization strategy
+        if "init" in params.keys():
+            self.init = params["init"]
+        else:
+            self.init = 'MU' # options: 'N' (sample from normal distribution), 'MU' (set to the mean), 'TN' (sample from truncated normal distribution), 'TN_3' (sample from truncated normal distribution with bounds at 3*si_stat from the mean)
+
         # Samples / sessions parameters
         self.N_samples = params["N_samples"]
         self.N_blocks = params["N_blocks"]
@@ -616,7 +620,7 @@ class AuditGenerativeModel:
                 self.si_r = self.si_r_set[samp_idx]
         
         res = self.generate_run(return_pars=self._return_pars)
-        return [*res]
+        return res
 
     def generate_batch(self, N_samples=None, return_pars=False):
         """Generate a batch of runs by repeatedly calling ``generate_run``.
@@ -630,10 +634,12 @@ class AuditGenerativeModel:
 
         Returns
         -------
-        tuple
-            A tuple with objects produced by ``generate_run`` stacked along a new
-            leading axis (so arrays become shape (N_samples, ...)). Dictionaries
-            (e.g. ``states``) are preserved as mappings to stacked arrays.
+        dict
+            A dictionary with keys for each data type produced by ``generate_run``, with values
+            stacked along a new leading axis (so arrays become shape (N_samples, ...)).
+            Keys include: 'contexts', 'states', 'obs', and optionally 'pars', 'rules', 
+            'rules_long', 'dpos', 'timbres', 'timbres_long', 'cues', 'cues_long', 'pi_rules'.
+            Dictionaries (e.g. ``states``) are preserved as mappings to stacked arrays.
         """
 
         # Store latent rules and timbres, states and observations from N_samples batches
@@ -693,10 +699,16 @@ class AuditGenerativeModel:
             for samp in range(N_samples):
                 batch.append(self._generate_single_sample(samp))
 
-        # Reorganize data as objects of size (N_samples, {obj_len}, 1) rather than a N_samples-long list of objects of size ({obj_len}, 1)
-        # ! Except for the dictionary variable like states, that should keep the keys separate
-        # res_reshaped = [np.stack([x for x in var_list], axis=0) for var_list in zip(*batches)]
-        res_reshaped = tuple(reshape_batch_variable(var_list) for var_list in zip(*batch))
+        # Reorganize data: batch is now a list of dictionaries
+        # Convert to a dictionary of lists (one list per key), then reshape each variable
+        batch_dict = {}
+        if batch:  # Check batch is not empty
+            # Get all keys from the first dictionary
+            for key in batch[0].keys():
+                batch_dict[key] = [sample[key] for sample in batch]
+        
+        # Now reshape each variable in the batch dictionary
+        res_reshaped = {key: reshape_batch_variable(var_list) for key, var_list in batch_dict.items()}
 
         return res_reshaped # TODO: should return pars here if params_testing as they're not sampled further down the pipeline
 
@@ -761,12 +773,19 @@ class NonHierarchicalAuditGM(AuditGenerativeModel):
         states = dict([(key, states[key].flatten()) for key in states.keys()])
         obs = obs.flatten()
 
+        # Build run_obj dictionary
+        run_obj = {
+            'contexts': contexts,
+            'states': states,
+            'obs': obs
+        }
+        
         if return_pars:
             # Add si_r to the parameters dictionary
             pars['si_r'] = self.si_r
-            return contexts, states, obs, pars
-        else:
-            return contexts, states, obs
+            run_obj['pars'] = pars
+            
+        return run_obj
 
 
 class HierarchicalAuditGM(AuditGenerativeModel):
@@ -825,12 +844,31 @@ class HierarchicalAuditGM(AuditGenerativeModel):
         # Timbres
         if "mu_rho_timbres" in params.keys():
             self.mu_rho_timbres = params["mu_rho_timbres"]
-        else:
-            self.mu_rho_timbres = 0.8 # Default value for compatibility
+        # else:
+        #     self.mu_rho_timbres = 0.8 # Default value for compatibility
         if "si_rho_timbres" in params.keys():
             self.si_rho_timbres = params["si_rho_timbres"]
-        else:
-            self.si_rho_timbres = 0.05 # Default value for compatibility
+        # else:
+        #     self.si_rho_timbres = 0.05 # Default value for compatibility
+        
+        # Cues
+        if "p_cues" in params.keys():
+            self.p_cues = params["p_cues"]
+        if "cues_set" in params.keys():
+            self.cues_set = params["cues_set"] 
+            self.N_cues = len(self.cues_set)
+    
+    @property
+    def N_dpos(self):
+        """Number of unique deviant positions (only for HierarchicalGM)."""
+        if self.rules_dpos_set is None:
+            return None
+        # Flatten all position sets and count unique values
+        all_positions = set()
+        for positions in self.rules_dpos_set:
+            if positions is not None:  # Handle None entries in rules_dpos_set
+                all_positions.update(positions)
+        return len(all_positions)
 
     def sample_rules(
         self, N_blocks, N_rules, mu_rho_rules, si_rho_rules, fixed_rule_id=None, fixed_rule_p=None, return_pi=False
@@ -906,6 +944,22 @@ class HierarchicalAuditGM(AuditGenerativeModel):
 
         return timbres
 
+    def sample_cues(self, rules, p_cues=None, cues_set=None):
+        """Sample cues with a probability p_cues[current rule] for cues_set[current rule] of being associated with the actual current rule
+        NOTE: the rules sequence needs to be the trial-by-trial sequence of rules, not the tone-by-tone storing of rules (rules_long)
+        """
+        
+        if p_cues is None:
+            p_cues = self.p_cues
+        if cues_set is None:
+            cues_set = self.cues_set
+        
+        cues = []
+        for rule in rules:
+            cue = np.random.choice(cues_set, p=[p_cues[rule], 1 - p_cues[rule]])
+            cues.append(cue)
+        return np.array(cues)
+
     def sample_dpos(self, rules, rules_dpos_set):
         """Sample positions of the deviant tones for each block of tones
 
@@ -931,6 +985,8 @@ class HierarchicalAuditGM(AuditGenerativeModel):
             else:
                 dpos.append(self.sample_uniform_choice(rule_set))
         return np.array(dpos, dtype=object)
+    
+
 
     def get_contexts(self, dpos, N_blocks, N_tones):
         contexts = np.zeros((N_blocks, N_tones), dtype=np.int64)
@@ -980,13 +1036,31 @@ class HierarchicalAuditGM(AuditGenerativeModel):
             rules = res
         rules_long = np.tile(rules[:, np.newaxis], (1, self.N_tones))
 
-        # Sample timbres (here we consider that there are as many different timbres as there are different rules -- self.N_rules)
-        timbres = self.sample_timbres(rules, self.N_rules, self.mu_rho_timbres, self.si_rho_timbres)
-        # Store timbres in a per-tone array # This is equivalent to matlab's repmat
-        timbres_long = np.tile(timbres[:, np.newaxis], (1, self.N_tones))
+        # OPTIONAL: sample timbres
+        if hasattr(self, "mu_rho_timbres") and hasattr(self, "si_rho_timbres"):
+            # Sample timbres (here we consider that there are as many different timbres as there are different rules -- self.N_rules)
+            timbres = self.sample_timbres(rules, self.N_rules, self.mu_rho_timbres, self.si_rho_timbres)
+            # Store timbres in a per-tone array # This is equivalent to matlab's repmat
+            timbres_long = np.tile(timbres[:, np.newaxis], (1, self.N_tones))
+            timbres_long = timbres_long.flatten()
+        else:
+            timbres = None
+            timbres_long = None
+
+        # OPTIONAL: sample cues
+        if hasattr(self, "p_cues") and hasattr(self, "cues_set"):
+            cues = self.sample_cues(rules, p_cues=self.p_cues, cues_set=self.cues_set)
+            cues_long = np.tile(cues[:, np.newaxis], (1, self.N_tones))
+            cues_long = cues_long.flatten()
+        else:
+            cues = None
+            cues_long = None
+
 
         # Sample deviant position
         dpos = self.sample_dpos(rules, self.rules_dpos_set)
+        dpos_long = np.tile(cues[:, np.newaxis], (1, self.N_tones))
+        dpos_long = dpos_long.flatten()
 
         # Get contexts
         contexts = self.get_contexts(dpos, self.N_blocks, self.N_tones)
@@ -1002,24 +1076,38 @@ class HierarchicalAuditGM(AuditGenerativeModel):
 
         # Flatten rules_long, contexts, (states, ) timbres and obs
         rules_long = rules_long.flatten()
-        timbres_long = timbres_long.flatten()
         contexts = contexts.flatten()
         states = dict([(key, states[key].flatten()) for key in states.keys()])
         obs = obs.flatten()
 
-        return_elements = (rules, rules_long, dpos, timbres, timbres_long, contexts, states, obs)
+        # Build run_obj dictionary
+        run_obj = {
+            'rules': rules,
+            'rules_long': rules_long,
+            'dpos': dpos,
+            'dpos_long': dpos_long,
+            'contexts': contexts,
+            'states': states,
+            'obs': obs
+        }
+        if timbres is not None and timbres_long is not None:
+            run_obj['timbres'] = timbres
+            run_obj['timbres_long'] = timbres_long
+        if cues is not None and cues_long is not None:
+            run_obj['cues'] = cues
+            run_obj['cues_long'] = cues_long
         
         # Return parameters
         if return_pars:
             # Add si_r to the parameters dictionary
             pars['si_r'] = self.si_r            
-            return_elements = (*return_elements, pars)
+            run_obj['pars'] = pars
         
         # Return transition rules
         if return_pi_rules:
-            return_elements = (*return_elements, pi_rules)
+            run_obj['pi_rules'] = pi_rules
         
-        return return_elements
+        return run_obj
 
     def plot_contexts_rules_states_obs(self, x_stds, x_dvts, ys, Cs, rules, dpos, pars, text=True):
         """For the hierachical evolution of rules and contexts (NOTE: timbres not included in this viz atm)
@@ -1350,11 +1438,7 @@ class HierarchicalAuditGM(AuditGenerativeModel):
 def example_HGM(config_H, plot_obs=False, plot_dpos_dist=False):
     gm = HierarchicalAuditGM(config_H)
 
-    if "return_pi_rules" in config_H.keys() and config_H["return_pi_rules"]:
-        rules, _, dpos, _, _, contexts, states, obs, pars, pi_rules = gm.generate_run(return_pars=True, return_pi_rules=config_H["return_pi_rules"])
-    else:
-        rules, _, dpos, _, _, contexts, states, obs, pars = gm.generate_run(return_pars=True)
-        pi_rules = None
+    run_obj = gm.generate_run(return_pars=True, return_pi_rules=config_H.get("return_pi_rules", False))
 
     # States, current blocks' rules, contexts based on rules and sampled deviant positions, and observations sampled from states based on context
     if config_H["N_blocks"] <= 20:
@@ -1367,20 +1451,20 @@ def example_HGM(config_H, plot_obs=False, plot_dpos_dist=False):
     # Deviant position for each rule
     # gm.plot_rules_dpos(rules, dpos, pars, text=text)
 
-    gm.plot_combined_with_matrix(states[0], states[1], obs, contexts, rules, dpos, pars, pi_rules=pi_rules, text=text, plot_obs=plot_obs, plot_dpos_dist=plot_dpos_dist)
+    gm.plot_combined_with_matrix(run_obj['states'][0], run_obj['states'][1], run_obj['obs'], run_obj['contexts'], run_obj['rules'], run_obj['dpos'], run_obj['pars'], pi_rules=run_obj.get('pi_rules'), text=text, plot_obs=plot_obs, plot_dpos_dist=plot_dpos_dist)
 
     # An example of the states and observation sampling for one block
-    gm.plot_contexts_states_obs(contexts[0:gm.N_tones], obs[0:gm.N_tones], states[0][0:gm.N_tones], states[1][0:gm.N_tones], gm.N_tones, pars=pars)
+    gm.plot_contexts_states_obs(run_obj['contexts'][0:gm.N_tones], run_obj['obs'][0:gm.N_tones], run_obj['states'][0][0:gm.N_tones], run_obj['states'][1][0:gm.N_tones], gm.N_tones, pars=run_obj['pars'])
 
 
 
 def example_NHGM(config_NH):
     gm_NH = NonHierarchicalAuditGM(config_NH)
 
-    contexts_NH, states_NH, obs_NH, pars = gm_NH.generate_run(return_pars=True)
+    run_obj = gm_NH.generate_run(return_pars=True)
 
     # States and observation sampled based on contexts
-    gm_NH.plot_contexts_states_obs(contexts_NH, obs_NH, states_NH[0], states_NH[1], gm_NH.N_tones, pars=pars, figsize=(20, 6))
+    gm_NH.plot_contexts_states_obs(run_obj['contexts'], run_obj['obs'], run_obj['states'][0], run_obj['states'][1], gm_NH.N_tones, pars=run_obj['pars'], figsize=(20, 6))
 
 
 def example_single(config_single):
@@ -1392,15 +1476,15 @@ def example_single(config_single):
     for i, tau in enumerate(tau_values):
         config_single["mu_tau"]=tau
         gm = NonHierarchicalAuditGM(config_single)
-        _, states, obs, pars = gm.generate_run(return_pars=True)
+        run_obj = gm.generate_run(return_pars=True)
 
         # Plot process states
-        axs[i].plot(range(len(states[0])), states[0], label='x_hid', color='orange', linewidth=2)
+        axs[i].plot(range(len(run_obj['states'][0])), run_obj['states'][0], label='x_hid', color='orange', linewidth=2)
             
         # Plot observation
-        axs[i].plot(range(len(obs)), obs, color='tab:blue', label='y_obs')
+        axs[i].plot(range(len(run_obj['obs'])), run_obj['obs'], color='tab:blue', label='y_obs')
 
-        axs[i].set_title(f"mu_tau = {tau}, tau = {pars['tau']:.2f}")
+        axs[i].set_title(f"mu_tau = {tau}, tau = {run_obj['pars']['tau']:.2f}")
 
     plt.tight_layout()
     #plt.show()
