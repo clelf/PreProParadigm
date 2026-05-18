@@ -984,7 +984,7 @@ class HierarchicalAuditGM(AuditGenerativeModel):
                 dpos.append(None)
             else:
                 dpos.append(self.sample_uniform_choice(rule_set))
-        return np.array(dpos, dtype=object)
+        return np.array(dpos, dtype=int)
     
 
 
@@ -1034,7 +1034,7 @@ class HierarchicalAuditGM(AuditGenerativeModel):
             rules, pi_rules = res
         else:
             rules = res
-        rules_long = np.tile(rules[:, np.newaxis], (1, self.N_tones))
+        rules_long = np.tile(rules[:, np.newaxis], (1, self.N_tones)).flatten()
 
         # OPTIONAL: sample timbres
         if hasattr(self, "mu_rho_timbres") and hasattr(self, "si_rho_timbres"):
@@ -1050,8 +1050,7 @@ class HierarchicalAuditGM(AuditGenerativeModel):
         # OPTIONAL: sample cues
         if hasattr(self, "p_cues") and hasattr(self, "cues_set"):
             cues = self.sample_cues(rules, p_cues=self.p_cues, cues_set=self.cues_set)
-            cues_long = np.tile(cues[:, np.newaxis], (1, self.N_tones))
-            cues_long = cues_long.flatten()
+            cues_long = np.tile(cues[:, np.newaxis], (1, self.N_tones)).flatten()
         else:
             cues = None
             cues_long = None
@@ -1059,8 +1058,7 @@ class HierarchicalAuditGM(AuditGenerativeModel):
 
         # Sample deviant position
         dpos = self.sample_dpos(rules, self.rules_dpos_set)
-        dpos_long = np.tile(cues[:, np.newaxis], (1, self.N_tones))
-        dpos_long = dpos_long.flatten()
+        dpos_long = np.tile(dpos[:, np.newaxis], (1, self.N_tones)).flatten()
 
         # Get contexts
         contexts = self.get_contexts(dpos, self.N_blocks, self.N_tones)
@@ -1074,8 +1072,7 @@ class HierarchicalAuditGM(AuditGenerativeModel):
         # Sample observations
         obs = self.sample_observations(contexts, states)
 
-        # Flatten rules_long, contexts, (states, ) timbres and obs
-        rules_long = rules_long.flatten()
+        # Flatten rules_long, contexts, states, and obs
         contexts = contexts.flatten()
         states = dict([(key, states[key].flatten()) for key in states.keys()])
         obs = obs.flatten()
