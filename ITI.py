@@ -45,23 +45,12 @@ while True:
     if (sum_iti + block_duration + duration_null + duration_feedback + baseline + initial_countdown) <= 12 and np.mean(iti) > 2.7:
         break
 
-final_itis = np.array(iti, dtype=float)
-
 plt.hist(iti, bins=75)
 plt.title(f"block duration: {sum_iti + block_duration + duration_null + duration_feedback + baseline + initial_countdown}")
 plt.ylabel('count')
 plt.xlabel('ITI duration (s)')
 plt.legend()
-plt.savefig('ITIs_example.png')
-
-plt.hist(final_itis, bins=75)
-plt.title(f"block duration: {sum_iti + block_duration + duration_null + duration_feedback + baseline + initial_countdown}")
-plt.ylabel('count')
-plt.xlabel('ITI (+ null events) duration (s)')
-plt.legend()
-plt.savefig('ITIs_null_example.png')
+plt.savefig('ITI.png')
 
 np.savetxt("itis.txt", iti)
 np.savetxt("null_events.txt", nulls)
-
-print(len(final_itis))
