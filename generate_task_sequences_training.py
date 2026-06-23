@@ -1,12 +1,12 @@
-# ---- imports ---- #
+# ----------------------------------------------------------#
+# IMPORTS
+# ----------------------------------------------------------#
 import audit_gm as gm
+from model_RTs import compute_likelihoods_at_deviants
 
 import numpy as np
 from numpy import ma
-
 import pandas as pd
-
-from pykalman import KalmanFilter
 
 import matplotlib.pyplot as plt
 from matplotlib.ticker import MaxNLocator
@@ -14,20 +14,20 @@ from matplotlib.lines import Line2D
 import matplotlib.patches as mpatches
 
 import os
-
 import time
 
-# ---- define class ----#
-
+# ----------------------------------------------------------#
+# DEFINE CLASS TRIALS MASTER
+# ----------------------------------------------------------#
 class trials_master:
 
     def __init__(self):
 
         self.config_H = {
 
-            "participant_nr": '', # participant nr, as also read in by PsychPy exp.
+            "participant_nr": '', # final participant nr as read in by PsychoPy, should be BIDS conform 
             "N_samples": 1,
-            "N_blocks": 60, # number of trials
+            "N_blocks": 60, # number of trials (per block)
             "N_tones": 8, # number of tones in each trial
             "rules_dpos_set": [[2, 3, 4], [4, 5, 6]], # deviant positions per rule
             "mu_tau": 16, # unused for experiment
@@ -37,27 +37,26 @@ class trials_master:
             "si_rho_rules": 0.05, # unused for experiment
             "mu_rho_timbres": 0.8, # unused for experiment
             "si_rho_timbres": 0.05, # unused for experiment
-            # "si_q": 2,  # process noise variance
-            "si_stat": 0.05,  # stationary process variance
+            "si_stat": 0.1,  # stationary process variance
             "si_r": 0.02,  # measurement noise variance
-            "si_d_coef": 0.05, # unused for experiment
+            "si_d_coef": 0.02, # unused for experiment
             "mu_d": 2, # unused for experiment
-            "return_pi_rules": True,
-            "fixed_rule_id": 2,
-            "fixed_rule_p": 0.1,
-            "rules_cmap": {0: "tab:blue", 1: "tab:red", 2: "tab:gray"},
+            "return_pi_rules": True, # return pi for rules
+            "fixed_rule_id": 2, # unused for experiment
+            "fixed_rule_p": 0.1, # unused for experimenz
+            "rules_cmap": {0: "tab:blue", 1: "tab:red", 2: "tab:gray"}, # color map
             "fix_process": True, # fix tau, lim, d to input values
-            "tau_std_ind": None,
+            "tau_std_ind": None, # index for tau_std (from [16, 40, 160, 240])
             "fix_tau_val": [16, 2], # tau std, tau dev
             "fix_lim_val": -0.6, # lim std
             "fix_d_val": 1, # effect size d
-            "fix_pi_rules": True,
-            "fix_pi_vals": [0.85, 0.15], # fixed values to create transition matrix
-            "n_sessions": 4, # number of sessions
+            "fix_pi_rules": True, # use fixed pi for rules
+            "fix_pi_vals": [0.85, 0.15], # fixed pi values to create transition matrix for rules
+            "n_sessions": 1, # number of sessions
             "n_runs": 4, # number of runs per session
-            "isi": 0.65, # inter-stimulus interval
-            "duration_tones": 0.1, # stimulus duration,
-            "init": 'TN', # how to initialize std dev processes
+            "isi": 0.65, # inter-stimulus interval (in s)
+            "duration_tones": 0.1, # stimulus duration (in s),
+            "init": 'TN_3', # how to initialize std dev processes
         }
 
     def prep_dirs(self):
@@ -82,8 +81,6 @@ class trials_master:
         target_eigenvect = eigenvects[:,close_to_1_idx]
         target_eigenvect = target_eigenvect[:,0]
         stationary_distrib = target_eigenvect / sum(target_eigenvect)
-
-        #print(f'stationary: {stationary_distrib}')
 
         return stationary_distrib
 
@@ -169,115 +166,7 @@ class trials_master:
         plt.yticks(np.arange(0, 0.47, 0.01))
         plt.tight_layout()
         plt.savefig(f"trial_lists_training/sub-{self.config_H['participant_nr']}/plots/probs_{type}_{num}.png", dpi=300, bbox_inches='tight')
-        #plt.show()
-        plt.close()
-
-    def apply_kalman(self, s, obs, contexts, si_q_arr, mu_tones, tau_std, figy, axy, n_iter = 10, tau_inits = 3.0, n_kalman = [8, 16, 24, 32, 40, 48, 56]):
-        '''applies kalman filter separately for each run of each session'''
-
-        run_length = self.config_H["N_blocks"] * 8
-        n_runs = self.config_H["n_runs"]
-
-        obs_use = obs.copy()
-       
-        obs_use[contexts == 1] = np.nan # we don't observe the standard in the position of the deviant
-
-        iter = -1 
-
-        for n in n_kalman:    
-
-            iter+= 1    
-            b_estimated_values = []
-
-            for run in range(n_runs):
-
-                tau_init = None
-                b_init = None
-
-                start_idx = run * run_length # get start of each run
-                end_idx = start_idx + n # only take n onservations at the beginning of each run
-                
-                measurements = obs_use[start_idx:end_idx] # standard observations (incl. deviant position as nan)
-
-                measurements = ma.asarray(measurements).reshape(-1, 1)
-                measurements[np.isnan(measurements)] = ma.masked # mask deviant position for pykalman to handle as missing observation
-
-                if tau_init is None:
-                    tau_init = tau_inits  # Reasonable default initial guess for tau
-                if b_init is None:
-                    # Estimate b from final observations (rough steady state estimate)
-                    if len(measurements) > 20:
-                        b_init = np.mean(measurements[-20:])  # Use mean of final observations
-                    else:
-                        b_init = np.mean(measurements[-len(measurements)//2:])  # Use latter half
-
-                # Convert to A matrix format: x_t = x_t-1 + (b - x_t-1)/tau
-                A_init = np.array([[1.0 - 1.0/tau_init, b_init/tau_init], [0.0, 1.0]])
-
-                # Ground truth noise covariances (FIXED, not estimated)
-                # note: sigma q varies across runs according to the current implementation
-                Q_true = np.array([[si_q_arr[run]**2, 0.0], [0.0, 0.0]])  # Only first state has noise
-                R_true = np.array([[self.config_H["si_r"]**2]])  # 1D observation noise
-
-                kf = KalmanFilter(
-                    transition_matrices=A_init,  # Start with random initial guess
-                    observation_matrices=np.array([[1.0, 0.0]]),  # Fixed - observe only x, not intercept
-                    transition_covariance=Q_true,  # Ground truth (FIXED)
-                    observation_covariance=R_true,  # Ground truth (FIXED)
-                    #initial_state_mean=np.array([0.0, 1.0]),  # Second component should be 1
-                    initial_state_mean=np.array([b_init, 1.0]),
-                    initial_state_covariance=np.array([[1.0, 0.0], [0.0, 0.01]]),  # Small variance on intercept
-                    n_dim_state=2,
-                    n_dim_obs=1  # 1D observations
-                )
-
-                kf_fitted = kf.em(measurements, n_iter=n_iter,
-                            em_vars=['transition_matrices', 'initial_state_mean', 'initial_state_covariance'])
-                
-                tau_est = 1.0 / (1.0 - kf_fitted.transition_matrices[0, 0])
-                b_est = kf_fitted.transition_matrices[0, 1] * tau_est
-                b_estimated_values.append(b_est)
-
-                state_means_filt, state_covariances_filt = kf_fitted.filter(measurements)
-                state_means_smooth, state_covariances_smooth = kf_fitted.smooth(measurements)
-
-
-            # prep plot for each N and session all four runs (corresponding to different taus and mus)
-            axy[iter, s].scatter(range(0,4), b_estimated_values, alpha=0.4, s=30, color='red', facecolors='red')
-            axy[iter, s].scatter(range(0,4), [val[0] for val in mu_tones[s]], alpha=0.4, s=30, color='blue', facecolors='blue')
-            axy[iter, s].set_xticks(range(4)) 
-            axy[iter, s].set_xticklabels([f'{tau_std[s][0]}', f'{tau_std[s][1]}', f'{tau_std[s][2]}', f'{tau_std[s][3]}'])
-            axy[iter, s].set_ylim(-2, 2)
-            axy[iter, s].set_yticks(np.arange(-2, 1, 10)) 
-            axy[iter, s].grid(True, alpha=0.3)
-        
-
-    def plot_kalman(self, figy, axy, n_kalman = [8, 16, 24, 32, 40, 48, 56]): 
-        '''plots kalman results across sessions and n observations'''
-
-        # just adding some labels and plot save the full plot across sessions
-        for n in range(len(n_kalman)):
-            axy[n, 0].set_ylabel(f'n = {n_kalman[n]}', fontsize=12, weight='bold')
-            
-        for s in range(0, self.config_H["n_sessions"]):
-            axy[0, s].set_title(f'session {s+1}', fontsize=12, weight='bold')
-            axy[-1, s].set_xlabel(f'tau', fontsize=12, weight='bold')
-
-
-        legend_elements = [
-            Line2D([0], [0], marker='o', color='w', label='Estimated b',
-                markerfacecolor='red', markersize=6),
-            Line2D([0], [0], marker='o', color='w', label='True mean',
-                markerfacecolor='blue', markersize=6)
-        ]
-
-        figy.legend(handles=legend_elements, loc='upper right', fontsize=10) 
-        figy.set_size_inches(25, 12) 
-        
-        plt.tight_layout()
-        plt.savefig(f"trial_lists_training/sub-{self.config_H["participant_nr"]}/plots/kalman_results.png", dpi=300, bbox_inches='tight')
-        #plt.show() 
-        plt.close()  
+        plt.close()    
 
     def frequency_transfer(self, x_input, x_min=-1, x_max=1, f_exp_min=500, f_exp_max=1300):
         '''compute frequency in Hz from input using the ERB transfer function
@@ -450,17 +339,26 @@ class trials_master:
         #plt.show()
         plt.close()
 
-    def generate_sessions(self, d, sign, n_cues, cue_prob):
+    def draw_iti_exponential(self, N, rate, low, high):
+
+        samples = []
+
+        while len(samples) < N:
+            s = np.random.exponential(scale=1/rate, size=N) + low
+            s = s[s <= high]
+            samples.extend(s.tolist())
+
+        intervals = np.array(samples[:N])
+
+        return intervals    
+
+    def generate_sessions(self, d, sign, cues, cue_prob):
 
         self.prep_dirs()
         mu_tones, taus_all, tau_std, tau_dev = self.define_task_structure()
-        figy, axy = plt.subplots(7, self.config_H["n_sessions"], squeeze=False)
 
         # for loop for sessions
         for s in range(0, self.config_H["n_sessions"]):
-                
-            session_nr = str(s + 1).zfill(2)
-            print(f"Generating session: {session_nr}")
 
             run_rules = []
             run_cues = []
@@ -535,8 +433,6 @@ class trials_master:
 
                             std_rat = pars['si_q'][0]/self.config_H["si_r"]
                             dev_rat = pars['si_q'][1]/self.config_H["si_r"]
-                            print(f" ratio si_q/si_r std run {r+1} = {std_rat}")
-                            print(f" ratio si_q/si_r dev run {r+1} = {dev_rat}")
 
                             states_std = states[0]
                             states_dev = states[1]
@@ -569,80 +465,26 @@ class trials_master:
                 r2_pos_6 = np.where((np.array(rules) == 1) & (np.array(dpos) == 5))[0]
                 r2_pos_7 = np.where((np.array(rules) == 1) & (np.array(dpos) == 6))[0]
 
-                print(len(r1_pos_3),len(r1_pos_4),len(r1_pos_5),len(r2_pos_5),len(r2_pos_6),len(r2_pos_7))
+                cuesy = np.full(len(rules), cues[0], dtype=object)
+                #cuesy = np.full(len(rules), np.random.choice(cues, size=len(rules), replace=True).tolist(), dtype=object)
 
-                if n_cues == 2:
-                    cues = np.full(len(rules), 'triangle', dtype=object)
-
-                    r1_cue_pos_3 = np.random.choice(r1_pos_3, size=int(cue_prob*len(r1_pos_3)), replace=False)
-                    r1_cue_pos_4 = np.random.choice(r1_pos_4, size=int(cue_prob*len(r1_pos_4)), replace=False)
-                    r1_cue_pos_5 = np.random.choice(r1_pos_5, size=int(cue_prob*len(r1_pos_5)), replace=False)
-                    
-                    r2_cue_pos_5 = np.random.choice(r2_pos_5, size=int(round((1-cue_prob),2)*len(r2_pos_5)), replace=False)
-                    r2_cue_pos_6 = np.random.choice(r2_pos_6, size=int(round((1-cue_prob),2)*len(r2_pos_6)), replace=False)
-                    r2_cue_pos_7 = np.random.choice(r2_pos_7, size=int(round((1-cue_prob),2)*len(r2_pos_7)), replace=False)
-
-                    r1_cue_1 = np.concatenate([r1_cue_pos_3, r1_cue_pos_4, r1_cue_pos_5])
-                    r2_cue_1 = np.concatenate([r2_cue_pos_5, r2_cue_pos_6, r2_cue_pos_7])
-
-                    cues[r1_cue_1] = 'circle'
-                    cues[r2_cue_1] = 'circle'  
-
-                    print(r1_cue_1)
-                    print(r2_cue_1)
+                r1_cue_pos_3 = np.random.choice(r1_pos_3, size=int(cue_prob*len(r1_pos_3)), replace=False)
+                r1_cue_pos_4 = np.random.choice(r1_pos_4, size=int(cue_prob*len(r1_pos_4)), replace=False)
+                r1_cue_pos_5 = np.random.choice(r1_pos_5, size=int(cue_prob*len(r1_pos_5)), replace=False)
                 
-                elif n_cues == 3:
+                r2_cue_pos_5 = np.random.choice(r2_pos_5, size=int(round((1-cue_prob),2)*len(r2_pos_5)), replace=False)
+                r2_cue_pos_6 = np.random.choice(r2_pos_6, size=int(round((1-cue_prob),2)*len(r2_pos_6)), replace=False)
+                r2_cue_pos_7 = np.random.choice(r2_pos_7, size=int(round((1-cue_prob),2)*len(r2_pos_7)), replace=False)
 
-                    cues = np.full(len(rules), 'empty', dtype=object)
-                    
-                    val = int((cue_prob*len(cues))/6)
-                    inval = int(((1-cue_prob)*len(cues))/6)
-                    print(val,inval)
+                r1_cue_1 = np.concatenate([r1_cue_pos_3, r1_cue_pos_4, r1_cue_pos_5])
+                r2_cue_1 = np.concatenate([r2_cue_pos_5, r2_cue_pos_6, r2_cue_pos_7])
 
-                    np.random.shuffle(r1_pos_3)
-                    val1_3 = r1_pos_3[:val]
-                    inval1_3 = r1_pos_3[val:val+inval]
-                    amb1_3 = r1_pos_3[val+inval:]
-
-                    print(val1_3, inval1_3, amb1_3)
-
-                    np.random.shuffle(r1_pos_4)
-                    val1_4 = r1_pos_4[:val]
-                    inval1_4 = r1_pos_4[val:val+inval]
-                    amb1_4 = r1_pos_4[val+inval:]
-
-                    np.random.shuffle(r1_pos_5)
-                    val1_5 = r1_pos_5[:val]
-                    inval1_5 = r1_pos_5[val:val+inval]
-                    amb1_5 = r1_pos_5[val+inval:]
-
-                    np.random.shuffle(r2_pos_5)
-                    val2_5 = r2_pos_5[:val]
-                    inval2_5 = r2_pos_5[val:val+inval]
-                    amb2_5 = r2_pos_5[val+inval:]
-
-                    np.random.shuffle(r2_pos_6)
-                    val2_6 = r2_pos_6[:val]
-                    inval2_6 = r2_pos_6[val:val+inval]
-                    amb2_6 = r2_pos_6[val+inval:]
-
-                    np.random.shuffle(r2_pos_7)
-                    val2_7 = r2_pos_7[:val]
-                    inval2_7 = r2_pos_7[val:val+inval]
-                    amb2_7 = r2_pos_7[val+inval:]
-
-                    circle = np.concatenate([val1_3, val1_4, val1_5, inval2_5, inval2_6, inval2_7])
-                    triangle = np.concatenate([inval1_3, inval1_4, inval1_5, val2_5, val2_6, val2_7])
-                    square = np.concatenate([amb1_3,amb1_4,amb1_5,amb2_5,amb2_6,amb2_7])
-
-                    cues[circle] = 'circle'
-                    cues[triangle] = 'triangle'
-                    cues[square] = 'square'
-
-
+                cuesy[r1_cue_1] = cues[1]
+                cuesy[r2_cue_1] = cues[1]  
+            
                 # collect data across runs
                 run_rules.append(rules)
-                run_cues.append(cues)
+                run_cues.append(cuesy)
                 run_dpos.append(dpos)
                 run_contexts.append(contexts)
                 run_states_std.append(states_std)
@@ -676,9 +518,6 @@ class trials_master:
 
             lim_dev_seq = [[mu_tones[s][x][1]]*self.config_H["N_blocks"]*self.config_H["N_tones"] for x in range(len(mu_tones[s]))]
             lim_dev_seq = np.concatenate(lim_dev_seq)
-                
-            # apply Kalman filter to each session
-            self.apply_kalman(s, run_obs, run_contexts, si_q_arr, mu_tones, tau_std, figy, axy)
 
             # apply frequency transfer to observations and plot observations in Hz
             obs_hz = []
@@ -702,11 +541,7 @@ class trials_master:
             self.plot_observations(s, obs_hz, run_contexts, run_rules, tau_std, run_dpos)   
 
             # save session output file to read in for experiment in psychopy
-            iti_range = 4# np.arange(7, 12, 0.5) # ITI range (change for fMRI)
-            ITI =[]
-
-            for i in range(0,len(run_dpos)):
-                ITI.append(iti_range)# ITI.append(np.random.choice(iti_range))
+            ITI =self.draw_iti_exponential(len(run_dpos),0.9,2.25,4)
 
             trials_final = pd.DataFrame(columns=['observation', 'frequency', 'state_std', 'state_dev','lim_std','lim_dev','tau_std','tau_dev', 'd',
                                                  'rule','dpos','trial_type','sigma_q_std','sigma_q_dev','sigma_r','ITI','duration_tones','ISI','trial_n','run_n','session_n'])
@@ -737,9 +572,6 @@ class trials_master:
             trials_final.loc[trials_final['trial_type'] == 1, 'diff_std'] = np.nan
             trials_final.loc[trials_final['trial_type'] == 0, 'diff_dev'] = np.nan
 
-            print(f"mean observation noise std: {np.nanmean(np.abs((trials_final['diff_std'])))}")
-            print(f"mean observation noise dev: {np.nanmean(np.abs((trials_final['diff_dev'])))}")
-
             trials_final['sigma_q_std'] = np.repeat([x for x in si_q_arr], self.config_H["N_tones"]*self.config_H["N_blocks"])
             trials_final['sigma_q_dev'] = np.repeat([x for x in si_q_dev_arr], self.config_H["N_tones"]*self.config_H["N_blocks"])
             trials_final['sigma_r'] = [self.config_H["si_r"]]*self.config_H["N_blocks"]*self.config_H["N_tones"]*len(tau_std[s])
@@ -755,47 +587,43 @@ class trials_master:
             trials_final.to_csv(f'trial_lists_training/sub-{self.config_H['participant_nr']}/sub-{self.config_H['participant_nr']}_ses-training_trials.csv', index=False, float_format="%.4f")
 
             session_duration = ((((self.config_H["N_tones"]-1)*self.config_H["isi"])+(self.config_H["N_tones"]*self.config_H["duration_tones"]))*self.config_H["N_blocks"]*(len(tau_std[s]))) + sum(trials_final['ITI'][::8])
-            print(f'Estimated session duration in minutes: {session_duration/60}')
-
-        # plot Kalman results across all sessions
-        self.plot_kalman(figy, axy, n_kalman = [8, 16, 24, 32, 40, 48, 56])        
+            print(f'Estimated session duration (without breaks) in minutes: {session_duration/60}') 
             
+# ----------------------------------------------------------#
+# GENERATE TRIAL SEQUENCES
+# ----------------------------------------------------------#
 if __name__ == "__main__":
     
-    subs = ["10"]
+    subs = ["all"]
 
     for suby in subs:
 
-        cnt = -1
-        tau_std_ind_all = np.array([[3, 2, 1, 0]])
+        tau_std_ind_all = np.array([[3, 2, 1, 0]]) # decreasing tau so it gets harder
         
-        #np.random.shuffle(tau_std_ind_all)
-        print(tau_std_ind_all)
-        
-        sessions = [1]
-        sign = [[-1,1,1,-1]]
-        n_cues = 2
+        sign = [[-1,1,1,-1]] # deviant up vs down
 
-        d = [2, 1.7, 1.7, 1.5]
+        d = [2, 1.7, 1.7, 1.5] # decreasing d
+
         si_stat = 0.1
         si_r_rat = 5
 
-        init = 'TN_3'
+        cues = ['pentagon','cross']
 
         print(f"=== Generating Trials with d = {d}, si_stat = {si_stat}, si_r = {si_stat/si_r_rat}  ===")
     
         task = trials_master()
+
         task.config_H["participant_nr"] = f"{suby}"
-        task.config_H["tau_std_ind"] = np.array([tau_std_ind_all[cnt]])
-        #task.config_H["fix_d_val"] = d
+        task.config_H["tau_std_ind"] = tau_std_ind_all
         task.config_H["si_stat"] = si_stat
         task.config_H["si_r"] = si_stat/si_r_rat
-        task.config_H["n_sessions"] = 1
-        task.config_H["init"] = init
 
         start = time.time()
+
         print("=== Generating Trials ===")
-        task.generate_sessions(d, sign, n_cues, cue_prob = 0.8) 
+
+        task.generate_sessions(d, sign, cues, cue_prob = 0.8) 
+
         end = time.time()
+
         print(f"=== Total Run Time Script: {(end-start)/60} ===")
-           
