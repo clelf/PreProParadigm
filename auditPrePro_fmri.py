@@ -30,7 +30,7 @@ import pandas as pd
 import numpy as np
 from scipy.interpolate import PchipInterpolator
 
-from datetime import date
+from datetime import date, datetime
 import os
 import sys
 
@@ -148,8 +148,7 @@ participant = expInfo['participant']
 session = expInfo['session']
 run_info = expInfo['run']
 
-date = date.today()
-date = date.strftime("%Y-%m-%d")
+date = datetime.now().strftime("%Y-%M-%d_%H_%M-%S")
 
 #---- open a screen and test if refresh rate can be measured
 mon = monitors.Monitor('tempMonitor') 
