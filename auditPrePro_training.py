@@ -38,13 +38,9 @@ import numpy as np
 from scipy.io.wavfile import write
 from scipy.interpolate import PchipInterpolator
 
-from datetime import date
+from datetime import date, datetime
 import os
 import sys
-
-devs = PsychPortAudio('GetDevices')
-prefs.hardware['audioDevice'] = devs[1]
-print(prefs.hardware['audioDevice'])
 
 # ----------------------------------------------------------#
 # FUNCTIONS
@@ -160,8 +156,7 @@ participant = expInfo['participant']
 session = expInfo['session']
 run_info = int(expInfo['run'])
 
-date = date.today()
-date = date.strftime("%Y-%m-%d")
+date = datetime.now().strftime("%Y-%M-%d_%H_%M-%S")
 
 #---- open a screen and test if refresh rate can be measured
 mon = monitors.Monitor('tempMonitor') 
@@ -296,7 +291,7 @@ feedback_trialy = []
 # ----------------------------------------------------------#
 # LOAD STIMULI
 # ----------------------------------------------------------#
-trials = pd.read_csv(f"{config['trial_dir']}/sub-all_ses-{session}_trials.csv")
+trials = pd.read_csv(f"{config['trial_dir']}sub-all/sub-all_ses-{session}_trials.csv")
 
 trials = trials[trials['run_n'] == run_info-1]
 n_trials = len(trials)/config['n_tones']
@@ -356,7 +351,7 @@ for i in pd.unique(trials["trial_n"]):
         sound_loud_weight[i-offsety].append(weighted)
 
 #---- open audio port
-pahandle = PsychPortAudio('Open', 1, 1, 4, config['sample_rate'], 1) # TODO sometimes necessary to adjust to device
+pahandle = PsychPortAudio('Open', [], 1, 4, config['sample_rate'], 1) # TODO sometimes necessary to adjust to device
 
 #---- load experiment: create all trials in advance from previously generated trial_list
 for i in pd.unique(trials["trial_n"]):
@@ -422,23 +417,16 @@ for i in pd.unique(trials["trial_n"]):
     
     for n,s in enumerate(oddball_trial):
 
-        if s is not None:
-            tone_count += 1
-            frequency.append(round(s,2))
-            #wave = generate_hct(round(s,2), config['duration'], config['sample_rate'], config['ramp_time'], config['k'], config['a'])
-            waveform.append(sound_loud_weight[i-offsety][n])
-            
-            if tone_count < config['n_tones']:
-                isi = generate_isi(config['ISI'], config['sample_rate'])
-                waveform.append(isi)
-            elif tone_count == config['n_tones']:
-                iti_wave = generate_isi(ITI, config['sample_rate'])
-                waveform.append(iti_wave)
-
-        if s is None:
-            null_event = generate_isi(trial_duration-config['pre_cue'], config['sample_rate'])
-            waveform.append(null_event)
-            iti_wave = generate_isi(ITI, config['sample_rate']) 
+        tone_count += 1
+        frequency.append(round(s,2))
+        #wave = generate_hct(round(s,2), config['duration'], config['sample_rate'], config['ramp_time'], config['k'], config['a'])
+        waveform.append(sound_loud_weight[i-offsety][n])
+        
+        if tone_count < config['n_tones']:
+            isi = generate_isi(config['ISI'], config['sample_rate'])
+            waveform.append(isi)
+        elif tone_count == config['n_tones']:
+            iti_wave = generate_isi(ITI, config['sample_rate'])
             waveform.append(iti_wave)
         
     waveform = np.concatenate(waveform)
@@ -564,9 +552,9 @@ for i in range(0, int(n_trials) + 1):
 
         data = []    
 
-        print(len(onset_sound), len(onset_tones), len(duration_sound), 
-              len(ITI_list), len(rts_getsecs_trial), len(rts_getsecs_dev), len(tau), len(frequency), len(lim_std), len(lim_dev),len(keys_pressed),
-              len(performance), len(rule),len(dpos),len(cue),len(tone_type),len(runs),len(trial_nr),len(feedback_trialy)) 
+        #print(len(onset_sound), len(onset_tones), len(duration_sound), 
+        #      len(ITI_list), len(rts_getsecs_trial), len(rts_getsecs_dev), len(tau), len(frequency), len(lim_std), len(lim_dev),len(keys_pressed),
+        #      len(performance), len(rule),len(dpos),len(cue),len(tone_type),len(runs),len(trial_nr),len(feedback_trialy)) 
 
         # ----------------------------------------------------------#
         # WRITE DATA OF PREVIOUS RUN
@@ -716,11 +704,6 @@ for i in range(0, int(n_trials) + 1):
     response_kb.clearEvents()  # clear any leftover keys
 
     show_shape = True
-
-    if dpos[i] is None:
-        print("null event")
-        message.text = '+'
-        message.draw()
 
     # while loop for trial progression
     while True and dpos[i] is not None:
@@ -885,8 +868,8 @@ for i in range(0, int(n_trials) + 1):
     onset_cues.append(cue_start)
     offset_cues.append(cue_end)
 
-    print(f'pressed: {key_name}')
-    print(f'performance: {performance[i]}')
+    #print(f'pressed: {key_name}')
+    #print(f'performance: {performance[i]}')
     
     # collect key presses and RTs
     if key_pressed == True:
