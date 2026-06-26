@@ -1,7 +1,7 @@
 # ----------------------------------------------------------#
 # IMPORTS
 # ----------------------------------------------------------#
-import audit_gm as gm
+import audit_gm_useversion_jasmin as gm
 from model_RTs import compute_likelihoods_at_deviants
 
 import numpy as np
