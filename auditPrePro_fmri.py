@@ -148,7 +148,7 @@ participant = expInfo['participant']
 session = expInfo['session']
 run_info = expInfo['run']
 
-date = datetime.now().strftime("%Y-%M-%d_%H_%M-%S")
+date = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
 
 #---- open a screen and test if refresh rate can be measured
 mon = monitors.Monitor('tempMonitor') 
@@ -435,7 +435,7 @@ buffer_handles = [] # buffer for audido playback
 # create all sound stimuli (incl. max amplitude weighing and loudness normalization)
 weight_list = pd.read_csv("weights_n_harmonics_5_a_1_duration_0.1_ramp_time_0.01_target_sone_1.csv")
 
-sound_raw = [[] for _ in range(len(pd.unique(trials["trial_n"])))]
+#sound_raw = [[] for _ in range(len(pd.unique(trials["trial_n"])))]
 sound_norm = [[] for _ in range(len(pd.unique(trials["trial_n"])))]
 f0s_all = [[] for _ in range(len(pd.unique(trials["trial_n"])))]
 
@@ -454,10 +454,10 @@ for i in pd.unique(trials["trial_n"]):
             config['a']
         )
 
-        sound_raw[i].append(raw)
+        #sound_raw[i].append(raw)
 
-        norm = raw / weight_list['max_amp'][0]
-        sound_norm[i].append(norm)
+        #norm = raw / weight_list['max_amp'][0]
+        sound_norm[i].append(raw)
 
 
 # loudness equalization!!! only works if the CSV file containing the weight was created with the exact tone duration and harmonic configuration as in config here!!!
@@ -468,7 +468,9 @@ for i in pd.unique(trials["trial_n"]):
     freq_data = trials[trials["trial_n"] == i]
     for n,s in enumerate(freq_data["frequency"]):
         freq = f0s_all[i][n]
+        print(freq)
         weight = float(interpolator(np.log(freq)))
+        print(weight)
         weighted = sound_norm[i][n] * weight
         sound_loud_weight[i].append(weighted)
 
@@ -653,7 +655,7 @@ for i in range(0, int(n_trials) + 1):
             'trigger_times_zero': [trigger_times_zero] * int(len(frequency)),
         })
 
-        data.to_csv(f"{config['log_dir']}/sub-{participant}_ses-{session}_task-AuditPreProFmri-run-{run_info}-events_{date}.tsv", sep='\t', index=False)
+        data.to_csv(f"{config['log_dir']}/sub-{participant}_ses-{session}_task-AuditPrePro_run-{run_info}_events-{date}.tsv", sep='\t', index=False)
         break
         
     #---- prepare sound playback

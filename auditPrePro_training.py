@@ -311,7 +311,7 @@ buffer_handles = [] # sound buffer
 # create all sound stimuli (incl. max amplitude weighing and loudness normalization)
 weight_list = pd.read_csv("weights_n_harmonics_5_a_1_duration_0.1_ramp_time_0.01_target_sone_1.csv")
 
-sound_raw = [[] for _ in range(len(pd.unique(trials["trial_n"])))]
+#sound_raw = [[] for _ in range(len(pd.unique(trials["trial_n"])))]
 sound_norm = [[] for _ in range(len(pd.unique(trials["trial_n"])))]
 f0s_all = [[] for _ in range(len(pd.unique(trials["trial_n"])))]
 
@@ -331,10 +331,10 @@ for i in pd.unique(trials["trial_n"]):
             config['a']
         )
 
-        sound_raw[i-offsety].append(raw)
+        #sound_raw[i-offsety].append(raw)
 
-        norm = raw / weight_list['max_amp'][0]
-        sound_norm[i-offsety].append(norm)
+        #norm = raw / weight_list['max_amp'][0]
+        sound_norm[i-offsety].append(raw)
 
 
 # loudness equalization!!! only works if the CSV file containing the weight was created with the exact tone duration and harmonic configuration as in config here!!!
@@ -587,7 +587,7 @@ for i in range(0, int(n_trials) + 1):
             'offset_cues':  np.repeat(offset_cues,config['n_tones']),
             })
         
-        data.to_csv(f"{config['log_dir']}/sub-{participant}_ses-{session}_task-AuditPreProTraining_run-{run_info}_events_{date}.tsv", sep='\t', index=False)
+        data.to_csv(f"{config['log_dir']}/sub-{participant}_ses-{session}_task-AuditPreProTraining_run-{run_info}_events-{date}.tsv", sep='\t', index=False)
         break
 
     # ----------------------------------------------------------#

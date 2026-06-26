@@ -112,7 +112,7 @@ def load_interpolator(path, column = 'weights'):
 # ----------------------------------------------------------#
 config = {
     'exp_name': 'AuditPreProTraining',
-    'screen_size': [3840, 2160],
+    'screen_size': [1680, 1050],
     'screen_units': 'pix',
     'mouse_visible': False,
     'log_dir': 'logfiles_refresher/',
@@ -192,26 +192,26 @@ end_kb = keyboard.Keyboard(backend = 'ptb')
 # ----------------------------------------------------------#
 # SETUP MESSAGES
 # ----------------------------------------------------------#
-message_too_fast = visual.TextStim(win, text='', wrapWidth=2000)
-message_too_fast.height = 50
+message_too_fast = visual.TextStim(win, text='', wrapWidth=1500)
+message_too_fast.height = 30
 message_too_fast.color = (1,0,0)
 message_too_fast.pos = (0, 150)
 
 #---- feedback for too slow
-feed = visual.TextStim(win, text='zu langsam', wrapWidth=2500)
+feed = visual.TextStim(win, text='zu langsam', wrapWidth=1500)
 feed.color = (1, 0, 0)
-feed.height = 50
+feed.height = 30
 feed.pos = (0, 150)
 
 # feedback for accuracy in last run
-feed_acc = visual.TextStim(win, text=' ', wrapWidth=2500)
+feed_acc = visual.TextStim(win, text=' ', wrapWidth=1500)
 feed_acc.color = (1, 1, 1)
-feed_acc.height = 100
+feed_acc.height = 60
 feed_acc.pos = (0, 0)
 
 catch_message = visual.TextStim(win, text='Welche Regel war im letzten Durchgang aktiv?\n\n\n\nRegel 1                 Regel 2', wrapWidth=2000)
 catch_message.color = (1, 1, 1)
-catch_message.height = 100
+catch_message.height = 60
 catch_message.pos = (0,0)
 
 # ----------------------------------------------------------#
@@ -251,8 +251,8 @@ shapes = {
 # ----------------------------------------------------------#
 # INITIALIZE VARS
 # ----------------------------------------------------------#
-message = visual.TextStim(win, text='Starte Experiment ...', wrapWidth=2000)
-message.height = 100
+message = visual.TextStim(win, text='Starte Experiment ...', wrapWidth=1500)
+message.height = 60
 message.draw()
 win.flip()
 
@@ -312,7 +312,7 @@ buffer_handles = [] # sound buffer
 # create all sound stimuli (incl. max amplitude weighing and loudness normalization)
 weight_list = pd.read_csv("weights_n_harmonics_5_a_1_duration_0.1_ramp_time_0.01_target_sone_1.csv")
 
-sound_raw = [[] for _ in range(len(pd.unique(trials["trial_n"])))]
+#sound_raw = [[] for _ in range(len(pd.unique(trials["trial_n"])))]
 sound_norm = [[] for _ in range(len(pd.unique(trials["trial_n"])))]
 f0s_all = [[] for _ in range(len(pd.unique(trials["trial_n"])))]
 
@@ -332,10 +332,10 @@ for i in pd.unique(trials["trial_n"]):
             config['a']
         )
 
-        sound_raw[i-offsety].append(raw)
+        #sound_raw[i-offsety].append(raw)
 
-        norm = raw / weight_list['max_amp'][0]
-        sound_norm[i-offsety].append(norm)
+        #norm = raw / weight_list['max_amp'][0]
+        sound_norm[i-offsety].append(raw)
 
 
 # loudness equalization!!! only works if the CSV file containing the weight was created with the exact tone duration and harmonic configuration as in config here!!!
@@ -358,8 +358,8 @@ pahandle = PsychPortAudio('Open', [], 1, 4, config['sample_rate'], 1) # TODO som
 for i in pd.unique(trials["trial_n"]):
     offsety = trials["trial_n"].iloc[0]
     
-    message = visual.TextStim(win, text='Lade Stimuli ...', wrapWidth=2000)
-    message.height = 100
+    message = visual.TextStim(win, text='Lade Stimuli ...', wrapWidth=1500)
+    message.height = 60
     message.draw()
     win.flip()
 
@@ -443,8 +443,8 @@ catch_all = np.zeros(len(pd.unique(trials["trial_n"])))
 # ----------------------------------------------------------#
 # WAIT FOR TRIGGER
 # ----------------------------------------------------------#
-message = visual.TextStim(win, text='Drücke die Leertaste, um zu starten.', wrapWidth=2000)
-message.height = 100
+message = visual.TextStim(win, text='Drücke die Leertaste, um zu starten.', wrapWidth=1500)
+message.height = 60
 message.draw()
 win.flip()
 
@@ -469,13 +469,13 @@ while True:
         secs = int(time_left % 60)
         if secs != 0:
             message.text = f'{secs:01}'
-            message.height = 100
+            message.height = 60
             message.pos = (0, 0)
             message.draw()
             win.flip()
         if secs == 0:    
             message.text = '+'
-            message.height = 100
+            message.height = 60
             message.pos = (0, 0)
             message.draw()
             win.flip()
@@ -545,7 +545,7 @@ for i in range(0, int(n_trials) + 1):
             'offset_cues':  np.repeat(offset_cues,config['n_tones']),
             })
         
-        data.to_csv(f"{config['log_dir']}/sub-{participant}_ses-{session}_task-AuditPreProRefresher_events_{date}.tsv", sep='\t', index=False)
+        data.to_csv(f"{config['log_dir']}/sub-{participant}_ses-{session}_task-AuditPreProRefresher_events-{date}.tsv", sep='\t', index=False)
         break
 
     # ----------------------------------------------------------#
