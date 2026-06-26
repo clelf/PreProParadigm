@@ -7,5 +7,12 @@ Clémentine's part:
 
 Jasmin's part:
 
-- Data sequence generation (generate_sequences(_training).py)
-- Experiment implementation (auditPrePro_exp_behavioral(_training).py)
+- Data sequence generation (generate_task_sequences(_training).py)
+- Experiment implementation:
+    - main task fMRI: (auditPrePro_fmri.py)
+    - main task training: (auditPrePro_training.py)
+    - main task refresher: (auditPrePro_refresher.py)
+    - functional localizer: (auditPrePro_localizer.py)
+    - sound check: (auditPrePro_sound_check.py)
+    - digit span implementation (digit_span.py)
+    - auxiliary things related to experimental design (ITI.py, generate_designs.py, add_itis_cues.py)
