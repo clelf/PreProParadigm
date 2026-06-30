@@ -465,7 +465,7 @@ class trials_master:
                 r2_pos_6 = np.where((np.array(rules) == 1) & (np.array(dpos) == 5))[0]
                 r2_pos_7 = np.where((np.array(rules) == 1) & (np.array(dpos) == 6))[0]
 
-                cuesy = np.full(len(rules), cues[0], dtype=object)
+                cuesy = np.full(len(rules), cues[1], dtype=object)
                 #cuesy = np.full(len(rules), np.random.choice(cues, size=len(rules), replace=True).tolist(), dtype=object)
 
                 r1_cue_pos_3 = np.random.choice(r1_pos_3, size=int(cue_prob*len(r1_pos_3)), replace=False)
@@ -479,8 +479,8 @@ class trials_master:
                 r1_cue_1 = np.concatenate([r1_cue_pos_3, r1_cue_pos_4, r1_cue_pos_5])
                 r2_cue_1 = np.concatenate([r2_cue_pos_5, r2_cue_pos_6, r2_cue_pos_7])
 
-                cuesy[r1_cue_1] = cues[1]
-                cuesy[r2_cue_1] = cues[1]  
+                cuesy[r1_cue_1] = cues[0]
+                cuesy[r2_cue_1] = cues[0]  
             
                 # collect data across runs
                 run_rules.append(rules)
@@ -607,7 +607,7 @@ if __name__ == "__main__":
         si_stat = 0.1
         si_r_rat = 5
 
-        cues = ['pentagon','cross']
+        cues = ['cross','pentagon']
 
         print(f"=== Generating Trials with d = {d}, si_stat = {si_stat}, si_r = {si_stat/si_r_rat}  ===")
     
