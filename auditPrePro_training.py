@@ -533,28 +533,29 @@ for i in range(0, int(n_trials) + 1):
 
     if runs[0] == (config['n_runs']-1):
         # get positions of feedback trials (in every 6th trial); not in last trial and only in last run
-        if i == 0 or i == n_trials:
-            feedback_trial = False
-            feedback_trialy.append(0)
-        if (i+1) % 6 == 0 and i > 0 and i <= n_trials - 1:
+        if (i+1) % 6 == 0 and i < n_trials - 1:
             feedback_trial = True
             feedback_trialy.append(1)
-        elif (i+1) % 6 != 0 and i > 0 and i <= n_trials - 1:
+        elif (i+1) % 6 != 0 and i < n_trials -1:
             feedback_trial = False
             feedback_trialy.append(0)
-    else:  
-        if i > 0 and i <= n_trials:
+        elif (i+1) == n_trials: 
             feedback_trial = False
-            feedback_trialy.append(0)      
-    
+            feedback_trialy.append(0)
+
+    else:  
+        if i < n_trials:
+            feedback_trial = False
+            feedback_trialy.append(0)
+
     # whenever run changes:
     if i == n_trials:
 
         data = []    
 
-        #print(len(onset_sound), len(onset_tones), len(duration_sound), 
-        #      len(ITI_list), len(rts_getsecs_trial), len(rts_getsecs_dev), len(tau), len(frequency), len(lim_std), len(lim_dev),len(keys_pressed),
-        #      len(performance), len(rule),len(dpos),len(cue),len(tone_type),len(runs),len(trial_nr),len(feedback_trialy)) 
+        print(len(onset_sound), len(onset_tones), len(duration_sound), 
+              len(ITI_list), len(rts_getsecs_trial), len(rts_getsecs_dev), len(tau), len(frequency), len(lim_std), len(lim_dev),len(keys_pressed),
+              len(performance), len(rule),len(dpos),len(cue),len(tone_type),len(runs),len(trial_nr),len(feedback_trialy)) 
 
         # ----------------------------------------------------------#
         # WRITE DATA OF PREVIOUS RUN

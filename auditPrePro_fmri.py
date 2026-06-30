@@ -609,15 +609,15 @@ feedback_trial = False
 for i in range(0, int(n_trials) + 1):
 
     # add indicator for feedback trials (every 6th trial but not at end of run)
-    if i == 0 or i == n_trials:
-        feedback_trial = False
-        feedback_trialy.append(0)
-    if (i+1) % 6 == 0 and i > 0 and i < (n_trials) - 1:
+    if (i+1) % 6 == 0 and i < n_trials - 1:
         feedback_trial = True
         feedback_trialy.append(1)
-    elif (i+1) % 6 != 0 and i > 0 and i < (n_trials) - 1:
+    elif (i+1) % 6 != 0 and i < n_trials -1:
         feedback_trial = False
         feedback_trialy.append(0)
+    elif (i+1) == n_trials: 
+        feedback_trial = False
+        feedback_trialy.append(0)  
     
     if i == (n_trials):
         
