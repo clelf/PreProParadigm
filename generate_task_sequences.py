@@ -12,7 +12,7 @@ from matplotlib.ticker import MaxNLocator
 from matplotlib.lines import Line2D
 import matplotlib.patches as mpatches
 
-import audit_gm as gm
+import audit_gm_useversion_jasmin as gm
 from model_RTs import compute_likelihoods_at_deviants, compute_dev_likelihoods_over_dpos, compute_dev_likelihoods_over_rules
 
 # ---- define class ----#
@@ -64,10 +64,10 @@ class trials_master:
 
         os.makedirs('fMRI/sequences_per_condition/', exist_ok=True)
 
-        sub_dir = f"fMRI/sequences_per_condition/{self.config_H["participant_nr"]}"
+        sub_dir = f"fMRI/sequences_per_condition_sub-02/{self.config_H["participant_nr"]}"
         os.makedirs(sub_dir, exist_ok=True)
 
-        plot_dir = f"fMRI/sequences_per_condition/{self.config_H["participant_nr"]}/plots"
+        plot_dir = f"fMRI/sequences_per_condition_sub-02/{self.config_H["participant_nr"]}/plots"
         os.makedirs(plot_dir, exist_ok=True)
 
         self.config_H['sub_dir'] = sub_dir
@@ -594,7 +594,7 @@ class trials_master:
                 r2_pos_6 = np.where((np.array(rules) == 1) & (np.array(dpos) == 5))[0]
                 r2_pos_7 = np.where((np.array(rules) == 1) & (np.array(dpos) == 6))[0]
 
-                cuesy = np.full(len(rules), cues[0], dtype=object)
+                cuesy = np.full(len(rules), cues[1], dtype=object)
 
                 r1_cue_pos_3 = np.random.choice(r1_pos_3, size=int(cue_prob*len(r1_pos_3)), replace=False)
                 r1_cue_pos_4 = np.random.choice(r1_pos_4, size=int(cue_prob*len(r1_pos_4)), replace=False)
@@ -607,8 +607,8 @@ class trials_master:
                 r1_cue_1 = np.concatenate([r1_cue_pos_3, r1_cue_pos_4, r1_cue_pos_5])
                 r2_cue_1 = np.concatenate([r2_cue_pos_5, r2_cue_pos_6, r2_cue_pos_7])
 
-                cuesy[r1_cue_1] = cues[1]
-                cuesy[r2_cue_1] = cues[1]  
+                cuesy[r1_cue_1] = cues[0]
+                cuesy[r2_cue_1] = cues[0]  
 
                 print(cuesy)
 
@@ -723,7 +723,7 @@ class trials_master:
 
                 run_unique = trials_run.drop_duplicates(subset="trial_n")
 
-            self.get_kalman_likelihoods_clem(trials_path, s, trials_final, tau_std, pi_rules)
+            #self.get_kalman_likelihoods_clem(trials_path, s, trials_final, tau_std, pi_rules)
             
 if __name__ == "__main__":
     
@@ -740,7 +740,7 @@ if __name__ == "__main__":
 
         init = 'TN_3'
 
-        cues = ['cue_3','cue_4']
+        cues = ['cue_1','cue_2']
 
         condy = 0
 
