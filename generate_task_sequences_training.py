@@ -384,31 +384,31 @@ class trials_master:
                     
                     # use Cléms implementation to generate data per run
                     hgm = gm.HierarchicalAuditGM(self.config_H)
-                    rules, _, dpos, _, _, contexts, states, obs, pars, pi_rules = hgm.generate_run(return_pars=True, return_pi_rules=self.config_H["return_pi_rules"])
+                    run_obj = hgm.generate_run(return_pars=True, return_pi_rules=self.config_H["return_pi_rules"])
 
                     # check if rules are balanced
-                    p_r1 = sum(rules == 0)/len(rules)
-                    p_r2 = sum(rules == 1)/len(rules)
+                    p_r1 = sum(run_obj['rules'] == 0)/len(run_obj['rules'])
+                    p_r2 = sum(run_obj['rules'] == 1)/len(run_obj['rules'])
                     p_rules = np.array([p_r1, p_r2])
 
-                    stationary_distrib = self.compute_stationary(pi_rules)
+                    stationary_distrib = self.compute_stationary(run_obj['pi_rules'])
 
                     if np.any((p_rules < (stationary_distrib[0]-0.02)) | (p_rules > (stationary_distrib[0]+0.02))): 
                         # allow for deviations of max. 2% in both directions from the stationary
                         continue
                     else:
                         # check if deviant positions are balanced within each rule
-                        ind_r1 = np.where(rules == 0)
-                        ind_r2 = np.where(rules == 1)
+                        ind_r1 = np.where(run_obj['rules'] == 0)
+                        ind_r2 = np.where(run_obj['rules'] == 1)
 
-                        vals_r1 = [dpos[i] for i in ind_r1]
-                        vals_r2 = [dpos[i] for i in ind_r2]
+                        vals_r1 = [run_obj['dpos'][i] for i in ind_r1]
+                        vals_r2 = [run_obj['dpos'][i] for i in ind_r2]
 
-                        vals_r1 = np.array([dpos[i] for i in ind_r1])
+                        vals_r1 = np.array([run_obj['dpos'][i] for i in ind_r1])
                         dpos_set_r1 = np.array(self.config_H["rules_dpos_set"][0])
                         counts_r1 = [(vals_r1 == v).sum() for v in dpos_set_r1]
 
-                        vals_r2 = np.array([dpos[i] for i in ind_r2])
+                        vals_r2 = np.array([run_obj['dpos'][i] for i in ind_r2])
                         dpos_set_r2 = np.array(self.config_H["rules_dpos_set"][1])
                         counts_r2 = [(vals_r2 == v).sum() for v in dpos_set_r2]
 
@@ -423,23 +423,25 @@ class trials_master:
                             unbalanced = False
 
                             # plot run using Cléms plotting approach
-                            hgm.plot_combined_with_matrix(states[0], states[1], obs, contexts, rules, dpos, pars, pi_rules=pi_rules, text=False)
+                            hgm.plot_combined_with_matrix(run_obj['states'][0], run_obj['states'][1], run_obj['obs'], run_obj['contexts'], run_obj['rules'], run_obj['dpos'], run_obj['pars'], pi_rules=run_obj['pi_rules'], text=False)
                             fig = plt.gcf() 
                             fig.savefig(f"trial_lists_training/sub-{self.config_H['participant_nr']}/plots/lgd_std_dev_session_{s+1}_run{r+1}_plot_clem.png", dpi=300, bbox_inches='tight')
                             plt.close()                         
                             
-                            si_q_arr.append(pars['si_q'][0])
-                            si_q_dev_arr.append(pars['si_q'][1])
+                            si_q_arr.append(run_obj['pars']['si_q'][0])
+                            si_q_dev_arr.append(run_obj['pars']['si_q'][1])
 
-                            std_rat = pars['si_q'][0]/self.config_H["si_r"]
-                            dev_rat = pars['si_q'][1]/self.config_H["si_r"]
+                            std_rat = run_obj['pars']['si_q'][0]/self.config_H["si_r"]
+                            dev_rat = run_obj['pars']['si_q'][1]/self.config_H["si_r"]
+                            print(f" ratio si_q/si_r std run {r+1} = {std_rat}")
+                            print(f" ratio si_q/si_r dev run {r+1} = {dev_rat}")
 
-                            states_std = states[0]
-                            states_dev = states[1]
-                            mu_tones[s][r][1] = pars['lim'][1]
+                            states_std = run_obj['states'][0]
+                            states_dev = run_obj['states'][1]
+                            mu_tones[s][r][1] = run_obj['pars']['lim'][1]
 
                 # plot probabilities per run
-                self.plot_probabilities(rules, dpos, r+1, f'session_{s+1}_run')
+                self.plot_probabilities(run_obj['rules'], run_obj['dpos'], r+1, f'session_{s+1}_run')
 
                 t_1_1 = 0
                 t_1_2 = 0
