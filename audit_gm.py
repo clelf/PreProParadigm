@@ -49,7 +49,20 @@ def reshape_batch_variable(var):
     else:
         # Direct array
         return np.stack([x for x in var], axis=0)
-    
+
+
+
+##### FMRI SUITED FEATURES
+
+def draw_iti_exponential(N, rate=0.9, low=2.25, high=4):
+    samples = []
+    while len(samples) < N:
+        s = np.random.exponential(scale=1/rate, size=N) + low
+        s = s[s <= high]
+        samples.extend(s.tolist())
+    intervals = np.array(samples[:N])
+    return intervals
+
 
 ##### GENERATIVE MODEL CLASSES
 
@@ -103,6 +116,15 @@ class AuditGenerativeModel:
         # Context parameters
         if "N_ctx" not in params.keys(): self.N_ctx = 2 # context refers to being a std / dvt
         else: self.N_ctx = params["N_ctx"]
+
+        # Couple the two process timescales (HierarchicalGM std/dev, i.e. N_ctx == 2):
+        # when True, tau is sampled once as the (faster) deviant timescale and the
+        # standard timescale is set to N_tones * tau_dev, i.e. tau_dev = tau_std / N_tones.
+        # This matches how the experimental sequences are generated. When False (or when
+        # N_ctx != 2) the previous behaviour is kept (both timescales equal in
+        # params_testing, or sampled independently otherwise). Default False so that
+        # callers that don't opt in are unaffected; the HierarchicalGM config passes True.
+        self.tau_std_dev_dependency = params.get("tau_std_dev_dependency", False)
 
         # In case of 2 contexts (std and dvt), define stationary values for both processes
         if "si_d_coef" in params.keys() and "mu_d" in params.keys() and "d_bounds" in params.keys():
@@ -406,11 +428,23 @@ class AuditGenerativeModel:
 
         if not self.fix_process:
             if self.params_testing:
-                tau = self.mu_tau * np.ones(self.N_ctx) # for compatibility with later, since when self.params_testing, N_ctx can only be 1
+                if self.tau_std_dev_dependency and self.N_ctx == 2:
+                    # Sampled base = deviant timescale; standard timescale is N_tones
+                    # slower (tau_dev = tau_std / N_tones). tau[0]=std, tau[1]=dev.
+                    tau_dev = self.mu_tau
+                    tau = np.array([tau_dev * self.N_tones, tau_dev])
+                else:
+                    tau = self.mu_tau * np.ones(self.N_ctx) # for compatibility with later, since when self.params_testing, N_ctx can only be 1
                 si_stat = self.si_stat
             else:
                 # NOTE: for mu_tau=64, si_tau=0.5 the distributions covers well the range of values from 1 to 256
-                tau = self._sample_logN_(min=1, mu=self.mu_tau, si=self.si_tau, size=self.N_ctx) # size = (N_ctx,) # TODO: should ensure tau_dev = (1/N_tones)*tau_std and tau_dev >= 1
+                if self.tau_std_dev_dependency and self.N_ctx == 2:
+                    # Sample the deviant timescale once (base) and derive the standard
+                    # timescale as N_tones * tau_dev (tau_dev = tau_std / N_tones, >= 1).
+                    tau_dev = self._sample_logN_(min=1, mu=self.mu_tau, si=self.si_tau, size=1).item()
+                    tau = np.array([tau_dev * self.N_tones, tau_dev]) # [tau_std, tau_dev]
+                else:
+                    tau = self._sample_logN_(min=1, mu=self.mu_tau, si=self.si_tau, size=self.N_ctx) # size = (N_ctx,)
                 si_stat = self._sample_logN_(min=0, mu=self.si_stat, si=0.2).item() # std and dvt share the same stationary variance
 
         elif self.fix_process:
@@ -852,12 +886,50 @@ class HierarchicalAuditGM(AuditGenerativeModel):
         #     self.si_rho_timbres = 0.05 # Default value for compatibility
         
         # Cues
+        # `cues_set` is the full pool of possible cue values (e.g. 12 values). Each
+        # generated sequence only uses a subset of `N_cues_per_seq` cues sampled from
+        # this pool. `N_cues` (used for the one-hot encoding dimension) reflects the
+        # full pool size so that the encoding dimension stays fixed regardless of which
+        # subset a given sequence draws.
         if "p_cues" in params.keys():
             self.p_cues = params["p_cues"]
         if "cues_set" in params.keys():
-            self.cues_set = params["cues_set"] 
+            self.cues_set = params["cues_set"]
             self.N_cues = len(self.cues_set)
-    
+            # Number of distinct cues used within a single sequence (subset size).
+            # Defaults to 2; must not exceed the size of the full pool.
+            self.N_cues_per_seq = params.get("N_cues_per_seq", 2)
+            if self.N_cues_per_seq > self.N_cues:
+                raise ValueError(
+                    f"N_cues_per_seq ({self.N_cues_per_seq}) cannot exceed the size of "
+                    f"the cue pool cues_set ({self.N_cues})."
+                )
+
+        # -----------------------------------------------------------------
+        # Inter-trial silences (OPTIONAL, disabled by default)
+        # -----------------------------------------------------------------
+        # When `iti` is True, each trial (block of N_tones tones) is followed by a
+        # variable number of "silence" timesteps, emulating the inter-trial interval
+        # (ITI) shown to human participants. Silence carries information (it is a
+        # labelled state), so it is encoded explicitly at every level:
+        #   - obs (y): sampled observation noise ~ N(0, si_r) (never a constant 0)
+        #   - discrete levels (contexts / dpos / rules / cues / timbres): a dedicated
+        #     "silence" token appended as an extra category at that level.
+        # Sequences stay rectangular: every run is padded with trailing silence to a
+        # fixed length so that batches can still be stacked (see _apply_iti).
+        self.iti = params.get("iti", False)
+        if self.iti:
+            # Physical timing used to convert an ITI in seconds into a number of
+            # timesteps. One timestep == one tone slot == tone_dur + tone_isi seconds.
+            self.tone_dur = params.get("tone_dur", 0.1)   # tone duration (s)
+            self.tone_isi = params.get("tone_isi", 0.65)  # inter-tone interval (s)
+            self.dt_slot = self.tone_dur + self.tone_isi  # seconds per timestep
+            # ITI sampling bounds (seconds), consumed by draw_iti_exponential.
+            self.iti_bounds = params.get("iti_bounds", {"rate": 0.9, "low": 2.25, "high": 4.0})
+            # Maximum number of silence timesteps a single ITI can span. Used to size
+            # the fixed padded sequence length so that every run fits.
+            self.max_iti_steps = int(np.ceil(self.iti_bounds["high"] / self.dt_slot))
+
     @property
     def N_dpos(self):
         """Number of unique deviant positions (only for HierarchicalGM)."""
@@ -869,6 +941,104 @@ class HierarchicalAuditGM(AuditGenerativeModel):
             if positions is not None:  # Handle None entries in rules_dpos_set
                 all_positions.update(positions)
         return len(all_positions)
+
+    @property
+    def dpos_silence_token(self):
+        """Raw dpos value used to mark silence timesteps.
+
+        dpos is stored as raw positions (e.g. 3..7), so the silence token must be a
+        value distinct from every valid position. Using max(position) + 1 guarantees
+        this and, once the pipeline converts dpos to 0-based indices (value - min),
+        maps to N_dpos, i.e. an extra "silence" class appended after the real ones.
+        """
+        all_positions = set()
+        for positions in self.rules_dpos_set:
+            if positions is not None:
+                all_positions.update(positions)
+        return int(max(all_positions)) + 1
+
+    def _apply_iti(self, run_obj, n_tones=None):
+        """Expand a single run with inter-trial silences (in place on a fresh dict).
+
+        Each trial (block of ``n_tones`` tones) is followed by a variable number of
+        silence timesteps drawn from ``draw_iti_exponential`` (converted from seconds
+        to timesteps via ``dt_slot``). Every run is padded with trailing silence to a
+        fixed length ``T' = N_blocks * (n_tones + max_iti_steps)`` so that runs of a
+        batch remain stackable.
+
+        The per-timestep streams are rewritten to length T':
+          - obs: real tones kept, silence filled with observation noise ~ N(0, si_r)
+          - contexts / rules_long / dpos_long / cues_long / timbres_long: real values
+            kept, silence filled with that level's dedicated silence token
+          - states: real values kept, silence filled with NaN (undefined during silence)
+
+        Two extra per-timestep arrays are added:
+          - 'is_silence' (T',) bool: True on silence/padding timesteps
+          - 'within_trial_pos' (T',) int: within-trial tone index on real timesteps,
+            -1 on silence timesteps (used downstream, e.g. for the dpos response window)
+
+        Per-block streams (rules, dpos, cues, timbres) are left unchanged.
+        """
+        if n_tones is None:
+            n_tones = self.N_tones
+
+        L = self.N_blocks * n_tones
+        T_prime = self.N_blocks * (n_tones + self.max_iti_steps)
+
+        # Number of silence timesteps after each trial
+        iti_sec = draw_iti_exponential(self.N_blocks, **self.iti_bounds)
+        n_sil = np.rint(iti_sec / self.dt_slot).astype(int)
+        n_sil = np.clip(n_sil, 0, self.max_iti_steps)
+
+        # Destination index of each real tone in the padded sequence + bookkeeping
+        dest = np.empty(L, dtype=int)
+        within_trial_pos = np.full(T_prime, -1, dtype=int)
+        is_silence = np.ones(T_prime, dtype=bool)
+        pos, k = 0, 0
+        for b in range(self.N_blocks):
+            for t in range(n_tones):
+                dest[k] = pos
+                within_trial_pos[pos] = t
+                is_silence[pos] = False
+                pos += 1
+                k += 1
+            pos += int(n_sil[b])
+
+        def _scatter(values, fill):
+            full = np.full(T_prime, fill, dtype=values.dtype)
+            full[dest] = values
+            return full
+
+        # Silence tokens per discrete level (one extra category appended after reals)
+        silence_tokens = {
+            'contexts': self.N_ctx,
+            'rules_long': self.N_rules,
+            'dpos_long': self.dpos_silence_token,
+            'cues_long': self.N_cues,
+            'timbres_long': self.N_rules,
+        }
+
+        expanded = dict(run_obj)
+
+        # Observations: silence carries sampled observation noise (not a constant 0)
+        obs_full = self._sample_N_(0, self.si_r, T_prime)
+        obs_full[dest] = run_obj['obs']
+        expanded['obs'] = obs_full
+
+        # Discrete per-timestep streams
+        for key, fill in silence_tokens.items():
+            if key in run_obj and run_obj[key] is not None:
+                expanded[key] = _scatter(np.asarray(run_obj[key]), fill)
+
+        # Hidden states: undefined during silence -> NaN
+        expanded['states'] = {
+            c: _scatter(np.asarray(x, dtype=float), np.nan) for c, x in run_obj['states'].items()
+        }
+
+        expanded['is_silence'] = is_silence
+        expanded['within_trial_pos'] = within_trial_pos
+
+        return expanded
 
     def sample_rules(
         self, N_blocks, N_rules, mu_rho_rules, si_rho_rules, fixed_rule_id=None, fixed_rule_p=None, return_pi=False
@@ -945,18 +1115,30 @@ class HierarchicalAuditGM(AuditGenerativeModel):
         return timbres
 
     def sample_cues(self, rules, p_cues=None, cues_set=None):
-        """Sample cues with a probability p_cues[current rule] for cues_set[current rule] of being associated with the actual current rule
-        NOTE: the rules sequence needs to be the trial-by-trial sequence of rules, not the tone-by-tone storing of rules (rules_long)
+        """Sample cues for a sequence.
+
+        The set of cues is sampled probabilistically: `cues_set` is the full pool of
+        possible cue values, and each sequence first draws a subset of `N_cues_per_seq`
+        (default 2) distinct cues from this pool. Each block is then associated with one
+        of the subset's cues with probability p_cues[current rule] (the remaining
+        probability mass going to the other subset cue).
+
+        NOTE: the rules sequence needs to be the trial-by-trial sequence of rules, not
+        the tone-by-tone storing of rules (rules_long).
         """
-        
+
         if p_cues is None:
             p_cues = self.p_cues
         if cues_set is None:
             cues_set = self.cues_set
-        
+
+        # Sample, once per sequence, the subset of cues actually used in this sequence
+        # from the full pool (without replacement).
+        seq_cues = self.sample_uniform_set(cues_set, N=self.N_cues_per_seq)
+
         cues = []
         for rule in rules:
-            cue = np.random.choice(cues_set, p=[p_cues[rule], 1 - p_cues[rule]])
+            cue = np.random.choice(seq_cues, p=[p_cues[rule], 1 - p_cues[rule]])
             cues.append(cue)
         return np.array(cues)
 
@@ -1103,7 +1285,13 @@ class HierarchicalAuditGM(AuditGenerativeModel):
         # Return transition rules
         if return_pi_rules:
             run_obj['pi_rules'] = pi_rules
-        
+
+        # OPTIONAL: insert inter-trial silences (expands the per-timestep streams to a
+        # fixed padded length and adds 'is_silence' / 'within_trial_pos'). Disabled by
+        # default so all existing use cases are unaffected.
+        if getattr(self, "iti", False):
+            run_obj = self._apply_iti(run_obj)
+
         return run_obj
 
     def plot_contexts_rules_states_obs(self, x_stds, x_dvts, ys, Cs, rules, dpos, pars, text=True):
@@ -1232,7 +1420,7 @@ class HierarchicalAuditGM(AuditGenerativeModel):
         #plt.show()
 
 
-    def plot_combined_with_matrix(self, x_stds, x_dvts, ys, Cs, rules, dpos, pars, pi_rules=None, text=True, plot_obs=False, plot_dpos_dist=False, save_path=None):
+    def plot_combined_with_matrix(self, x_stds, x_dvts, ys, Cs, rules, dpos, pars, pi_rules=None, text=True, plot_obs=False, plot_dpos_dist=False, save_path=None, title=None):
         """
         Plots plot_contexts_rules_states_obs and plot_rules_dpos as subplots, and pi_rules as a matrix on the side.
         Includes histograms with KDE of dpos distribution to the right of the dpos plot.
@@ -1260,7 +1448,6 @@ class HierarchicalAuditGM(AuditGenerativeModel):
 
         # Top subplot: contexts, rules, states, obs
         ax1.set_xlim(0, len(x_stds)-1)
-        ax1.set_yticks([])
         # ax1.set_ylim(min(np.min(x_stds), np.min(x_dvts), np.min(ys)) - 0.5, max(np.max(x_stds), np.max(x_dvts), np.max(ys)) + 0.5)
         ax1.plot(x_stds, label="standard", color="tab:blue", linestyle="-", linewidth=2, alpha=0.8) # label="x_std"
         ax1.plot(x_dvts, label="deviant", color="tab:red", linestyle="-", linewidth=2, alpha=0.8) # label="x_dvt"
@@ -1291,10 +1478,14 @@ class HierarchicalAuditGM(AuditGenerativeModel):
         # ax1.legend(bbox_to_anchor=(1.0, 1))
         ax1.legend(loc='lower left')
 
+        # If title is provided:
+        if title is not None:
+            ax1.set_title(title) #, y=-0.25)
+
         # Bottom subplot: rules/dpos
         for i, y in enumerate(dpos):
-            ax3.vlines(x=i, ymin=0, ymax=y, color="tab:gray", linewidth=0.9, zorder=1, alpha=0.5)
-        ax3.scatter(range(len(dpos)), dpos, c=[self.rules_cmap[rule] for rule in rules], zorder=2)
+            ax3.vlines(x=i, ymin=0, ymax=y+1, color="tab:gray", linewidth=0.9, zorder=1, alpha=0.5)
+        ax3.scatter(range(len(dpos)), dpos+1, c=[self.rules_cmap[rule] for rule in rules], zorder=2)
         ax3.set_ylabel("deviant location")
         ax3.set_xlabel("trials")
         ax3.set_xlim(0, len(dpos)-1)
@@ -1303,7 +1494,7 @@ class HierarchicalAuditGM(AuditGenerativeModel):
         ax3.set_xticks(range(len(dpos)))
         handles = [plt.Line2D([0], [0], marker="o", color="w", markerfacecolor=color, markersize=10) for color in self.rules_cmap.values()]
         labels = self.rules_cmap.keys()
-        ax3.legend(handles, labels, title="rule")
+        ax3.legend(handles, labels, title="rule", loc='lower left')
         # ax3.set_xticks(np.arange(0, self.N_blocks + 1, 50))
         ax3.set_xticks(np.arange(0, self.N_blocks * self.N_tones + 1, 50)/self.N_tones, labels=np.arange(0, self.N_blocks * self.N_tones + 1, 50))
 

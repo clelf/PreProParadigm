@@ -54,11 +54,6 @@ def prepare_trials_data(trials_path, exclude_null=False):
     return trials
 
 
-def compute_predictions():
-    pass
-
-def compute_likelihoods():
-    pass
 
 def compute_likelihoods_at_deviants(trials_path, sub, sess, results_save_path=None, observation_noise=None):
     """
@@ -202,28 +197,38 @@ def get_valid_positions_per_rule():
     }
 
 
-def prior_dpos_given_prev_rule(d, r):
+def prior_dpos_given_prev_rule(d, r, valid_positions=None):
     """
     Prior probability of deviant occurring at position d, given rule r.
-    
+
     Mathematical formulation:
     P(d = t | r) = { 1 / |D_r|  if t ∈ D_r
                    { 0          otherwise
-    
+
     where:
       - d: deviant position
       - r: rule
       - D_r: set of valid deviant positions under rule r
       - |D_r|: cardinality (number of valid positions for rule r)
-    
+
     Interpretation: Within each rule, all valid deviant positions are equally probable
     (uniform distribution over D_r).
+
+    Parameters
+    ----------
+    valid_positions : dict, optional
+        Mapping {rule -> list of valid deviant positions}. If None, falls back to
+        get_valid_positions_per_rule() (the original hard-coded PreProParadigm map).
+        Pass a dict derived from the data config's rules_dpos_set to reuse this
+        hazard for a different GM (e.g. the RNN HierarchicalGM, where rule 0 = [3,4,5]).
     """
-    valid_positions = get_valid_positions_per_rule()
-    
-    if r == 2 or r not in valid_positions:
+    if valid_positions is None:
+        valid_positions = get_valid_positions_per_rule()
+
+    # rules absent from valid_positions (e.g. a null rule) get zero mass
+    if r not in valid_positions:
         return 0
-    
+
     if d in valid_positions[r]:
         return 1.0 / (max(valid_positions[r])-d+1) # uniform over valid positions left
     else:
@@ -243,7 +248,7 @@ def prior_dpos_given_prev_stds(d):
     }
     return probas[d]
 
-def pior_dpos_given_prev_rule_and_stds(d, pi_rule, r_prev):
+def pior_dpos_given_prev_rule_and_stds(d, pi_rule, r_prev, valid_positions=None):
     """
     Posterior probability of deviant at position d, given previous rule, transitions, 
     AND that all positions before d are standard.
@@ -263,13 +268,20 @@ def pior_dpos_given_prev_rule_and_stds(d, pi_rule, r_prev):
     Interpretation: Given what we've observed (that earlier positions were standard),
     where do we think the deviant is? This is the POSTERIOR—updated belief after seeing data.
     
-    """      
-    valid_positions = get_valid_positions_per_rule()
+    Parameters
+    ----------
+    valid_positions : dict, optional
+        Mapping {rule -> list of valid deviant positions}. If None, falls back to
+        get_valid_positions_per_rule(). Pass a dict from the data config's
+        rules_dpos_set to reuse this marginalization for another GM.
+    """
+    if valid_positions is None:
+        valid_positions = get_valid_positions_per_rule()
     rules = list(valid_positions.keys())
-    # Sum over current rules, weighted by transition probability    
+    # Sum over current rules, weighted by transition probability
     # Using posterior position priors (condition on S_{<d})
     prob_sum = sum(
-        prior_dpos_given_prev_rule(d, r) * pi_rule[r_prev, r]
+        prior_dpos_given_prev_rule(d, r, valid_positions) * pi_rule[r_prev, r]
         for r in rules
     )
     return prob_sum
@@ -527,8 +539,10 @@ def aggregate_data(trials_path, logfiles_path, subject, session_num, likelihoods
         # `trials` already has `trial_no`, and `preds`/`preds_liks_dev` also contain it.
         # If we keep multiple copies, later merges will attempt to suffix into names
         # like `trial_no_x` that may already exist, triggering a MergeError.
-        preds = preds.drop(columns=['trial_no'])
-        preds_liks_dev = preds_liks_dev.drop(columns=['trial_no'])
+        if 'trial_no' in preds.columns:
+            preds = preds.drop(columns=['trial_no'])
+        if 'trial_no' in preds_liks_dev.columns:
+            preds_liks_dev = preds_liks_dev.drop(columns=['trial_no'])
 
     logs = load_logs(logfiles_path, subject, session_num, filter=False, n_run=4)
     # mask = ~np.isnan(losad) & ~np.isnan(rt) & (rt>=0)
@@ -625,12 +639,13 @@ def compare_likelihoods_with_RTs_global(subjects, trials_path, preds_liks_path, 
             lik_col = 'likelihood_obs_std_at_dev_over_dpos' if take_dpos else 'likelihood_obs_std_at_dev'
             df_filtered = df_all[~np.isnan(df_all[lik_col]) & ~np.isnan(df_all['rt']) & (df_all['rt'] >= 0)].reset_index(drop=True)
             
-            # plot association RT with likelihood_obs_std_at_dev
-            corr = ss.pearsonr(df_filtered[lik_col], df_filtered['rt'])
-            sns.regplot(df_filtered, x=lik_col, y='rt', scatter=True, ax=axs[i,j],
-                        color=sns.color_palette("Paired")[0],
-                        line_kws={'color': sns.color_palette("Paired")[1], 'linewidth': 2, 
-                                'label':rf"$\rho$: {corr[0]:.2f}, p: {corr[1]:.1g}"})
+            if not (take_rules and not take_dpos):
+                # plot association RT with likelihood_obs_std_at_dev
+                corr = ss.pearsonr(df_filtered[lik_col], df_filtered['rt'])
+                sns.regplot(df_filtered, x=lik_col, y='rt', scatter=True, ax=axs[i,j],
+                            color=sns.color_palette("Paired")[0],
+                            line_kws={'color': sns.color_palette("Paired")[1], 'linewidth': 2, 
+                                    'label':rf"$\rho$: {corr[0]:.2f}, p: {corr[1]:.1g}"})
 
             # Plot rules
             if take_rules:                
@@ -654,14 +669,16 @@ def compare_likelihoods_with_RTs_global(subjects, trials_path, preds_liks_path, 
         ax.set_title(f"d: {session_params[0]}, $\\sigma$_stat: {session_params[1]},\n$\\sigma$_r: {session_params[2]}", fontsize=16, pad=20)
     
     # Add subject labels as text on the left side and RT labels for first column
-    subject_labels = [f"Subject {subj}" for subj in subjects] # NOTE: this is for publication ['Subject 1', 'Subject 2', 'Subject 3']
+    # subject_labels = [f"Subject {subj}" for subj in subjects]
+    subject_labels = [f"Subject {subj}" for subj in ['1', '2', '3']] # NOTE: this is for publication
+
     for k, ax in enumerate(axs[:, 0]):
         ax.set_ylabel("RT (s)", fontsize=12, rotation=90, labelpad=6, va='center')
         # Add subject label to the left of the plot using figure coordinates
         fig.text(0.042, ax.get_position().y0 + ax.get_position().height/2, subject_labels[k], 
                 fontsize=16, rotation=90, va='center', ha='right', weight='normal')
 
-    if take_rules:
+    if take_rules and not (take_rules and not take_dpos):
         # Create custom legend for line colors (without rules vs with rules)
         custom_lines = [Line2D([0], [0], color=sns.color_palette("Paired")[1], lw=2),
                         Line2D([0], [0], color=sns.color_palette("Paired")[3], lw=2)]
@@ -673,7 +690,7 @@ def compare_likelihoods_with_RTs_global(subjects, trials_path, preds_liks_path, 
 
     plt.tight_layout(rect=[0.05, 0.05, 1, 1])
     plt.subplots_adjust(wspace=0.2, hspace=0.3)
-    save_name = f"{comparison_save_path}/RT_3sub_4sess{'_with_rules' if take_rules else ''}_obsnoise-{obs_noise}.png"
+    save_name = f"{comparison_save_path}/RT_3sub_4sess{'_with_rules' if take_rules else ''}{'_wout_dpos' if not take_dpos else ''}{f'_obsnoise-{obs_noise}' if obs_noise is not None else ''}.png"
     plt.savefig(save_name, dpi=600)
     print(f"Saved fig as {save_name}")
 
