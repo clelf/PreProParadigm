@@ -1,6 +1,7 @@
 # ---- imports ---- #
 import numpy as np
 import pandas as pd
+import argparse
 
 import os
 import time
@@ -12,7 +13,7 @@ from matplotlib.ticker import MaxNLocator
 from matplotlib.lines import Line2D
 import matplotlib.patches as mpatches
 
-import audit_gm_useversion_jasmin as gm
+import audit_gm as gm
 from model_RTs import compute_likelihoods_at_deviants, compute_dev_likelihoods_over_dpos, compute_dev_likelihoods_over_rules
 
 # ---- define class ----#
@@ -59,15 +60,13 @@ class trials_master:
             "plot_dir": None
         }
 
-    def prep_dirs(self):
+    def prep_dirs(self, sub, ses):
         '''create necessary output directories to save trial lists and plots'''
 
-        os.makedirs('fMRI/sequences_per_condition/', exist_ok=True)
-
-        sub_dir = f"fMRI/sequences_per_condition_sub-02/{self.config_H["participant_nr"]}"
+        sub_dir = f"/data/p_03132/AuditPrePro_MRT/code/PreProParadigm/fMRI/sequences_per_condition_sub-{sub}_ses-{ses}/{self.config_H['participant_nr']}"
         os.makedirs(sub_dir, exist_ok=True)
 
-        plot_dir = f"fMRI/sequences_per_condition_sub-02/{self.config_H["participant_nr"]}/plots"
+        plot_dir = f"/data/p_03132/AuditPrePro_MRT/code/PreProParadigm/fMRI/sequences_per_condition_sub-{sub}_ses-{ses}/{self.config_H['participant_nr']}/plots"
         os.makedirs(plot_dir, exist_ok=True)
 
         self.config_H['sub_dir'] = sub_dir
@@ -139,6 +138,8 @@ class trials_master:
 
     def get_kalman_likelihoods_clem(self, trials_path, s, trials_final, tau_std, pi_rules):
 
+        # attention: quick fix: only works if only one run is generated!
+
         '''get Kalman-likelihoods using model_RTs
         
         Args:
@@ -150,8 +151,11 @@ class trials_master:
 
         Returns: (plots likelihood, likelihoods over dpos, and likelihood over rules)
         '''
+        print(f"passing observation noise: {self.config_H["si_r"]}")
 
-        results_df = compute_likelihoods_at_deviants(trials_path, self.config_H['participant_nr'], s, results_save_path=f'{self.config_H['sub_dir']}/')
+        results_df = compute_likelihoods_at_deviants(trials_path, self.config_H['participant_nr'], s, results_save_path=f"{self.config_H['sub_dir']}/", sigma_r = self.config_H["si_r"])
+
+        print(results_df)
         
         trials_final_no_null = trials_final[~trials_final["trial_n"].astype(str).str.contains("null", na=False)]
         results_df['rules'] = trials_final_no_null['rule'].iloc[::8].tolist()
@@ -161,38 +165,17 @@ class trials_master:
         mask1 = (results_df['dpos'] == 4) & (results_df['rules'] == 0)
         mask2 = (results_df['dpos'] == 4) & (results_df['rules'] == 1)
 
+        results_df['dpos'] = results_df["dpos"].astype(float)
         results_df.loc[mask1, 'dpos'] = 3.8
         results_df.loc[mask2, 'dpos'] = 4.2
 
-        # scatter plot KF result per dpos
-        chunks = np.array_split(results_df, self.config_H['n_runs'])
-        fig, axes = plt.subplots(1, self.config_H['n_runs'] + 1, figsize=(20, 4))
-        for i, chunk in enumerate(chunks):
-            axes[i].scatter(chunk['dpos'], chunk['likelihood_obs_std_at_dev'])
-            axes[i].set_title(f'run {i+1}, tau = {tau_std[s][i]}')
-
-        # plot full dataframe
-        axes[-1].scatter(results_df['dpos'], results_df['likelihood_obs_std_at_dev'])
-        axes[-1].set_title('full session')
+        fig, axes = plt.subplots(figsize=(6, 6))
+        axes.scatter(results_df['dpos'], results_df['likelihood_obs_std_at_dev'])
+        axes.set_title(f'tau = {tau_std[s][0]}')
 
         plt.ylim()
         plt.tight_layout()
         plt.savefig(f"{self.config_H['plot_dir']}/KF_likelihoods_std_at_dev_session_{s+1}.png", dpi=300, bbox_inches='tight')
-        plt.close()
-
-        chunks = np.array_split(results_df, self.config_H['n_runs'])
-        fig, axes = plt.subplots(1, self.config_H['n_runs'] + 1, figsize=(20, 4))
-        for i, chunk in enumerate(chunks):
-            axes[i].scatter(chunk['dpos'], chunk['likelihood_obs_dev_at_dev'])
-            axes[i].set_title(f'run {i+1}, tau = {tau_std[s][i]}')
-
-        # plot full dataframe
-        axes[-1].scatter(results_df['dpos'], results_df['likelihood_obs_dev_at_dev'])
-        axes[-1].set_title('full session')
-
-        plt.ylim()
-        plt.tight_layout()
-        plt.savefig(f"{self.config_H['plot_dir']}/KF_likelihoods_dev_at_dev_session_{s+1}.png", dpi=300, bbox_inches='tight')
         plt.close()
 
         results_df_dpos = compute_dev_likelihoods_over_dpos(trials_path, results_df, self.config_H['participant_nr'], s, results_save_path=None, inplace=False)
@@ -204,18 +187,13 @@ class trials_master:
         mask1 = (results_df_dpos['dpos'] == 4) & (results_df_dpos['rules'] == 0)
         mask2 = (results_df_dpos['dpos'] == 4) & (results_df_dpos['rules'] == 1)
 
+        results_df_dpos['dpos'] = results_df_dpos["dpos"].astype(float)
         results_df_dpos.loc[mask1, 'dpos'] = 3.8
         results_df_dpos.loc[mask2, 'dpos'] = 4.2
 
-        chunks = np.array_split(results_df_dpos, self.config_H['n_runs'])
-        fig, axes = plt.subplots(1, self.config_H['n_runs'] + 1, figsize=(20, 4))
-        for i, chunk in enumerate(chunks):
-            axes[i].scatter(chunk['dpos'], chunk['likelihood_obs_std_at_dev_over_dpos'])
-            axes[i].set_title(f'run {i+1}, tau = {tau_std[s][i]}')
-
-        # plot full dataframe
-        axes[-1].scatter(results_df['dpos'], results_df['likelihood_obs_std_at_dev_over_dpos'])
-        axes[-1].set_title('full session')
+        fig, axes = plt.subplots(figsize=(6, 6))
+        axes.scatter(results_df_dpos['dpos'], results_df_dpos['likelihood_obs_std_at_dev_over_dpos'])
+        axes.set_title(f'tau = {tau_std[s][0]}')
 
         plt.ylim()
         plt.tight_layout()
@@ -231,20 +209,15 @@ class trials_master:
         mask1 = (results_df_rules['dpos'] == 4) & (results_df_rules['rules'] == 0)
         mask2 = (results_df_rules['dpos'] == 4) & (results_df_rules['rules'] == 1)
 
+        results_df_rules['dpos'] = results_df_rules["dpos"].astype(float)
         results_df_rules.loc[mask1, 'dpos'] = 3.8
         results_df_rules.loc[mask2, 'dpos'] = 4.2
 
         results_df_rules.to_csv(f"{self.config_H['sub_dir']}/results_KF_session_{s+1}.csv", index=False)
 
-        chunks = np.array_split(results_df_rules, self.config_H['n_runs'])
-        fig, axes = plt.subplots(1, self.config_H['n_runs'] + 1, figsize=(20, 4))
-        for i, chunk in enumerate(chunks):
-            axes[i].scatter(chunk['dpos'], chunk['likelihood_obs_std_at_dev_over_rules'])
-            axes[i].set_title(f'run {i+1}, tau = {tau_std[s][i]}')
-
-        # plot full dataframe
-        axes[-1].scatter(results_df['dpos'], results_df['likelihood_obs_std_at_dev_over_rules'])
-        axes[-1].set_title('full session')
+        fig, axes = plt.subplots(figsize=(6, 6))
+        axes.scatter(results_df_rules['dpos'], results_df_rules['likelihood_obs_std_at_dev_over_rules'])
+        axes.set_title(f', tau = {tau_std[s][0]}')
 
         plt.ylim()
         plt.tight_layout()
@@ -458,7 +431,7 @@ class trials_master:
         plt.savefig(f"{self.config_H['plot_dir']}/observations_std_dev_session_{s+1}.png", dpi=300, bbox_inches='tight')
         plt.close()
 
-    def generate_sessions(self, d, cue_prob, cues, single_run_config = None):
+    def generate_sessions(self, sub, ses, d, cue_prob, cues, single_run_config = None):
 
         ''' generates all experimental sessions
 
@@ -471,7 +444,7 @@ class trials_master:
         
         '''
 
-        self.prep_dirs()
+        self.prep_dirs(sub, ses)
 
         if self.config_H['n_runs'] > 1:
             df = self.randomize_design_abc(self.config_H["n_runs"], self.config_H["n_sessions"])
@@ -580,26 +553,26 @@ class trials_master:
                 t_2_1 = 0
                 t_2_2 = 0
 
-                for ru in range(1,len(rules)):
-                    if rules[ru] == 0 and rules[ru-1] == 0:
+                for ru in range(1,len(run_obj['rules'])):
+                    if run_obj['rules'][ru] == 0 and run_obj['rules'][ru-1] == 0:
                         t_1_1 += 1
-                    elif rules[ru] == 1 and rules[ru-1] == 0:
+                    elif run_obj['rules'][ru] == 1 and run_obj['rules'][ru-1] == 0:
                         t_1_2 += 1
-                    elif rules[ru] == 0 and rules[ru-1] == 1:
+                    elif run_obj['rules'][ru] == 0 and run_obj['rules'][ru-1] == 1:
                         t_2_1 += 1
-                    elif rules[ru] == 1 and rules[ru-1] == 1:
+                    elif run_obj['rules'][ru] == 1 and run_obj['rules'][ru-1] == 1:
                         t_2_2 += 1
                 
                 # add probabilistic cues
-                r1_pos_3 = np.where((np.array(rules) == 0) & (np.array(dpos) == 2))[0]
-                r1_pos_4 = np.where((np.array(rules) == 0) & (np.array(dpos) == 3))[0]
-                r1_pos_5 = np.where((np.array(rules) == 0) & (np.array(dpos) == 4))[0]
+                r1_pos_3 = np.where((np.array(run_obj['rules']) == 0) & (np.array(run_obj['dpos']) == 2))[0]
+                r1_pos_4 = np.where((np.array(run_obj['rules']) == 0) & (np.array(run_obj['dpos']) == 3))[0]
+                r1_pos_5 = np.where((np.array(run_obj['rules']) == 0) & (np.array(run_obj['dpos']) == 4))[0]
                 
-                r2_pos_5 = np.where((np.array(rules) == 1) & (np.array(dpos) == 4))[0]
-                r2_pos_6 = np.where((np.array(rules) == 1) & (np.array(dpos) == 5))[0]
-                r2_pos_7 = np.where((np.array(rules) == 1) & (np.array(dpos) == 6))[0]
+                r2_pos_5 = np.where((np.array(run_obj['rules']) == 1) & (np.array(run_obj['dpos']) == 4))[0]
+                r2_pos_6 = np.where((np.array(run_obj['rules']) == 1) & (np.array(run_obj['dpos']) == 5))[0]
+                r2_pos_7 = np.where((np.array(run_obj['rules']) == 1) & (np.array(run_obj['dpos']) == 6))[0]
 
-                cuesy = np.full(len(rules), cues[1], dtype=object)
+                cuesy = np.full(len(run_obj['rules']), cues[1], dtype=object)
 
                 r1_cue_pos_3 = np.random.choice(r1_pos_3, size=int(cue_prob*len(r1_pos_3)), replace=False)
                 r1_cue_pos_4 = np.random.choice(r1_pos_4, size=int(cue_prob*len(r1_pos_4)), replace=False)
@@ -618,13 +591,13 @@ class trials_master:
                 print(cuesy)
 
                 # collect data across runs
-                run_rules.append(rules)
+                run_rules.append(run_obj['rules'])
                 run_cues.append(cuesy)
-                run_dpos.append(dpos)
-                run_contexts.append(contexts)
+                run_dpos.append(run_obj['dpos'])
+                run_contexts.append(run_obj['contexts'])
                 run_states_std.append(states_std)
                 run_states_dev.append(states_dev)
-                run_obs.append(obs) 
+                run_obs.append(run_obj['obs']) 
                 
             # plot probabilities per session
             run_rules = np.concatenate(run_rules)
@@ -717,24 +690,36 @@ class trials_master:
             trials_final['run_n'] = np.repeat([range(0,len(tau_std[s]))], self.config_H["N_blocks"]*self.config_H["N_tones"])
             trials_final['session_n'] = [s]*self.config_H["N_blocks"]*self.config_H["N_tones"]*len(tau_std[s])
 
-            trials_path = f'{self.config_H['sub_dir']}/sub-{self.config_H['participant_nr']}_ses-{s+1}_trials.csv'
+            trials_path = f"{self.config_H['sub_dir']}/sub-{self.config_H['participant_nr']}_ses-{s+1}_trials.csv"
             trials_final.to_csv(trials_path, index=False, float_format="%.4f")
             
             # write out runs separately
             for r in range(0, self.config_H["n_runs"]):
 
                 trials_run = trials_final.loc[trials_final['run_n']==r]
-                trials_run.to_csv(f'{self.config_H['sub_dir']}/sub-{self.config_H['participant_nr']}_ses-{s+1}_run-{r+1}_trials.csv', index=False, float_format="%.4f")
+                trials_run.to_csv(f"{self.config_H['sub_dir']}/sub-{self.config_H['participant_nr']}_ses-{s+1}_run-{r+1}_trials.csv", index=False, float_format="%.4f")
 
                 run_unique = trials_run.drop_duplicates(subset="trial_n")
 
-            #self.get_kalman_likelihoods_clem(trials_path, s, trials_final, tau_std, pi_rules)
+            self.get_kalman_likelihoods_clem(trials_path, s, trials_final, tau_std, run_obj['pi_rules'])
             
 if __name__ == "__main__":
-    
-    subs = [f"seq{i}" for i in range(1, 101)]
 
-    for suby in subs:
+    parser = argparse.ArgumentParser()
+
+    parser.add_argument("--sub", type=str, required=True)
+    parser.add_argument("--ses", type=str, required=True)
+    parser.add_argument("--seq", type=int, required=True)
+
+    args = parser.parse_args()
+
+    i = args.seq
+    subject_n = args.sub
+    session_n = args.ses
+    
+    sequences = [f"seq{i}"]
+
+    for seqy in sequences:
 
         cue_prob = 0.8
 
@@ -760,7 +745,7 @@ if __name__ == "__main__":
 
                     task = trials_master()
 
-                    task.config_H["participant_nr"] = f"{suby}_cond{condy}_tau{tau_std}_mu{mu_cond}_dev{dev_cond}"
+                    task.config_H["participant_nr"] = f"{seqy}_cond{condy}_tau{tau_std}_mu{mu_cond}_dev{dev_cond}"
                     task.config_H["si_stat"] = si_stat
                     task.config_H["si_r"] = si_stat/si_r_rat
                     task.config_H["n_sessions"] = 1
@@ -771,7 +756,7 @@ if __name__ == "__main__":
 
                     start = time.time()
 
-                    task.generate_sessions(d, cue_prob, cues, single_run_config) 
+                    task.generate_sessions(subject_n, session_n, d, cue_prob, cues, single_run_config) 
 
                     end = time.time()
 
