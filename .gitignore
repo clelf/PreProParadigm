@@ -9,3 +9,5 @@
 *.nii
 *.nii.gz
 *.dcm
+*.out
+*.err
