@@ -6,3 +6,5 @@
 *.pdf
 *.svg
 *.wav
+*.nii
+*.nii.gz
