@@ -448,24 +448,24 @@ class trials_master:
                 t_2_1 = 0
                 t_2_2 = 0
 
-                for ru in range(1,len(rules)):
-                    if rules[ru] == 0 and rules[ru-1] == 0:
+                for ru in range(1,len(run_obj['rules'])):
+                    if run_obj['rules'][ru] == 0 and run_obj['rules'][ru-1] == 0:
                         t_1_1 += 1
-                    elif rules[ru] == 1 and rules[ru-1] == 0:
+                    elif run_obj['rules'][ru] == 1 and run_obj['rules'][ru-1] == 0:
                         t_1_2 += 1
-                    elif rules[ru] == 0 and rules[ru-1] == 1:
+                    elif run_obj['rules'][ru] == 0 and run_obj['rules'][ru-1] == 1:
                         t_2_1 += 1
-                    elif rules[ru] == 1 and rules[ru-1] == 1:
+                    elif run_obj['rules'][ru] == 1 and run_obj['rules'][ru-1] == 1:
                         t_2_2 += 1
 
                 # add probabilistic cues
-                r1_pos_3 = np.where((np.array(rules) == 0) & (np.array(dpos) == 2))[0]
-                r1_pos_4 = np.where((np.array(rules) == 0) & (np.array(dpos) == 3))[0]
-                r1_pos_5 = np.where((np.array(rules) == 0) & (np.array(dpos) == 4))[0]
+                r1_pos_3 = np.where((np.array(run_obj['rules']) == 0) & (np.array(run_obj['dpos']) == 2))[0]
+                r1_pos_4 = np.where((np.array(run_obj['rules']) == 0) & (np.array(run_obj['dpos']) == 3))[0]
+                r1_pos_5 = np.where((np.array(run_obj['rules']) == 0) & (np.array(run_obj['dpos']) == 4))[0]
                 
-                r2_pos_5 = np.where((np.array(rules) == 1) & (np.array(dpos) == 4))[0]
-                r2_pos_6 = np.where((np.array(rules) == 1) & (np.array(dpos) == 5))[0]
-                r2_pos_7 = np.where((np.array(rules) == 1) & (np.array(dpos) == 6))[0]
+                r2_pos_5 = np.where((np.array(run_obj['rules']) == 1) & (np.array(run_obj['dpos']) == 4))[0]
+                r2_pos_6 = np.where((np.array(run_obj['rules']) == 1) & (np.array(run_obj['dpos']) == 5))[0]
+                r2_pos_7 = np.where((np.array(run_obj['rules']) == 1) & (np.array(run_obj['dpos']) == 6))[0]
 
                 cuesy = np.full(len(rules), cues[1], dtype=object)
                 #cuesy = np.full(len(rules), np.random.choice(cues, size=len(rules), replace=True).tolist(), dtype=object)
@@ -485,13 +485,13 @@ class trials_master:
                 cuesy[r2_cue_1] = cues[0]  
             
                 # collect data across runs
-                run_rules.append(rules)
+                run_rules.append(run_obj['rules'])
                 run_cues.append(cuesy)
-                run_dpos.append(dpos)
-                run_contexts.append(contexts)
+                run_dpos.append(run_obj['dpos'])
+                run_contexts.append(run_obj['contexts'])
                 run_states_std.append(states_std)
                 run_states_dev.append(states_dev)
-                run_obs.append(obs)   
+                run_obs.append(run_obj['obs'])   
                 
             # plot probabilities per session
             run_rules = np.concatenate(run_rules)

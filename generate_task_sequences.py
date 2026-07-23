@@ -37,9 +37,9 @@ class trials_master:
             "mu_rho_timbres": 0.8, # unused for experiment
             "si_rho_timbres": 0.05, # unused for experiment
             # "si_q": 2,  # process noise variance
-            "si_stat": 0.05,  # stationary process variance
+            "si_stat": 0.1,  # stationary process variance
             "si_r": 0.02,  # measurement noise variance
-            "si_d_coef": 0.05, # unused for experiment
+            "si_d_coef": 0.02, # unused for experiment
             "mu_d": 2, # unused for experiment
             "return_pi_rules": True,
             "fixed_rule_id": 2,
