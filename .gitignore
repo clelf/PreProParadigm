@@ -8,3 +8,4 @@
 *.wav
 *.nii
 *.nii.gz
+*.dcm
