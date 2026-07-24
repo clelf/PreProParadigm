@@ -51,6 +51,7 @@ Figures are saved into a per-variant `exp_runs_viz_likelihoods*` folder next to 
 """
 
 import os
+import re
 import sys
 import glob
 import numpy as np
@@ -102,7 +103,7 @@ KF_EM_COLOR = 'darkorange'
 #                     KF_EM_COLOR), on top of the LI when MODELS == 'KF_LI'. Both KF files must
 #                     exist or the session is skipped.
 # TODO: modify here to switch variants.
-KF_VARIANT = 'both'
+KF_VARIANT = 'true_sigma_r'
 
 KF_VARIANT_FOLDERS = {
     'true_sigma_r': 'exp_runs_viz_likelihoods',
@@ -116,6 +117,13 @@ KF_VARIANT_FOLDERS = {
 #   'show_loglik' -> Gaussian log-likelihood  log p(y | mu_pred_std, sigma_pred_std)
 #   None          -> no twin axis (figure unchanged)
 SHOW_LIK = 'show_lik'
+
+# When True, title each figure with the run's generative parameters -- d, sigma_r, tau_std,
+# tau_dev, sigma_stat, sigma_q_std, sigma_q_dev. All but sigma_stat are triallist columns
+# (tau_* and sigma_q_* vary per run, d/sigma_r are session-constant); sigma_stat is a
+# per-session parameter read from the triallist filename (…-si_statZ-…). False leaves the
+# axes untitled, as before.
+SHOW_PARAMS = True
 
 
 def plot_obs_and_models(obs, contexts, models, save_path, title=None, show_lik=None):
@@ -204,7 +212,9 @@ def plot_obs_and_models(obs, contexts, models, save_path, title=None, show_lik=N
         # seats them (and the 'trial' label) in the gap above the likelihood panel.
         ax.tick_params(axis='x', labelbottom=True)
     if title is not None:
-        ax.set_title(title)
+        # Small font: the parameter title is long, and this keeps it on one line within the
+        # 10-inch figure width instead of overflowing (which bbox='tight' would widen to fit).
+        ax.set_title(title, fontsize=8)
 
     # Legend inside the top panel (upper-right, usually clear of the near-zero observations and
     # sparse deviant spikes). frameon=False makes it frameless: no border and a transparent
@@ -278,6 +288,9 @@ if __name__ == "__main__":
     if SHOW_LIK not in (None, 'show_lik', 'show_loglik'):
         raise ValueError(f"SHOW_LIK must be None, 'show_lik' or 'show_loglik', got {SHOW_LIK!r}")
 
+    if not isinstance(SHOW_PARAMS, bool):
+        raise ValueError(f"SHOW_PARAMS must be True or False, got {SHOW_PARAMS!r}")
+
     results_save_folder = os.path.join(os.path.dirname(__file__), KF_VARIANT_FOLDERS[KF_VARIANT])
     os.makedirs(results_save_folder, exist_ok=True)
 
@@ -295,6 +308,12 @@ if __name__ == "__main__":
             continue
 
         trials = prepare_trials_data(trials_path[0])
+
+        # sigma_stat (the stationary std) is a per-session parameter encoded in the triallist
+        # filename (…-si_stat0.1-…), not a column, so parse it once here for the title. None if
+        # the pattern is absent, in which case the title shows sigma_stat=NA.
+        si_stat_match = re.search(r'si_stat([0-9.]+)', os.path.basename(trials_path[0]))
+        sigma_stat = float(si_stat_match.group(1)) if si_stat_match else None
 
         # Assemble the KF overlay(s) for this session as (filename, colour, label). 'both' returns
         # two -- the true-sigma_r KF and the EM-fitted KF -- so they can be read side by side on
@@ -352,6 +371,19 @@ if __name__ == "__main__":
             obs = trials.loc[trials['run_n'] == run_id, 'observation'].reset_index(drop=True)
             ctx = trials.loc[trials['run_n'] == run_id, 'contexts'].reset_index(drop=True)
 
+            # Optional parameter title. tau_* and sigma_q_* vary per run, so read them from THIS
+            # run's rows (they are constant within a run, hence .iloc[0]); d/sigma_r are session-
+            # constant and sigma_stat came from the filename above. :g trims float noise so e.g.
+            # 0.034800000000000005 prints as 0.0348.
+            title = None
+            if SHOW_PARAMS:
+                p = trials.loc[trials['run_n'] == run_id].iloc[0]
+                ss = f"{sigma_stat:g}" if sigma_stat is not None else "NA"
+                title = (f"sub-{sub}, ses-{sess+1}, run {run_id} -- "
+                         f"d={p['d']:g}, sigma_r={p['sigma_r']:g}, "
+                         f"tau_std={p['tau_std']:g}, tau_dev={p['tau_dev']:g}, sigma_stat={ss}, "
+                         f"sigma_q_std={p['sigma_q_std']:g}, sigma_q_dev={p['sigma_q_dev']:g}")
+
             # Assemble this run's overlays for plot_obs_and_models, drawn in order: the LI first
             # (black, underneath) when available, then the selected KF variant(s). All use the
             # standard-context prediction (mu_pred_std +/- sigma_pred_std), a standard deviation
@@ -370,6 +402,6 @@ if __name__ == "__main__":
 
             plot_obs_and_models(
                 obs=obs, contexts=ctx, models=run_models, save_path=save_path,
-                # title=f"sub-{sub}, ses-{sess+1}, run {run_id} -- ",
+                title=title,
                 show_lik=SHOW_LIK,
             )
