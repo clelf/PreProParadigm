@@ -1435,8 +1435,8 @@ class HierarchicalAuditGM(AuditGenerativeModel):
         # Top left: ax1
         ax1 = fig.add_subplot(gs_main[0, 0])
         
-        # Bottom left: ax3
-        ax3 = fig.add_subplot(gs_main[1, 0])
+        # Bottom left: ax3 (shares x-axis with ax1 so trial positions line up exactly)
+        ax3 = fig.add_subplot(gs_main[1, 0], sharex=ax1)
         
         # Top right: ax4 (will appear smaller naturally)
         ax4 = fig.add_subplot(gs_main[0, 1])
@@ -1477,26 +1477,32 @@ class HierarchicalAuditGM(AuditGenerativeModel):
         ax1.fill_between(range(len(x_dvts)), pars['lim'][1] - pars['si_stat'], pars['lim'][1] + pars['si_stat'], color="tab:red", alpha=0.2) # label="lim_dvt ± si_stat"
         # ax1.legend(bbox_to_anchor=(1.0, 1))
         ax1.legend(loc='lower left')
+        ax1.spines['top'].set_visible(False)
+        ax1.spines['right'].set_visible(False)
 
         # If title is provided:
         if title is not None:
             ax1.set_title(title) #, y=-0.25)
 
         # Bottom subplot: rules/dpos
+        # Trial centers, in the same tone-index units as ax1, so each dot/vline
+        # falls midway between the two trial-boundary vlines drawn on ax1.
+        trial_centers = np.arange(len(dpos)) * self.N_tones + self.N_tones / 2
         for i, y in enumerate(dpos):
-            ax3.vlines(x=i, ymin=0, ymax=y+1, color="tab:gray", linewidth=0.9, zorder=1, alpha=0.5)
-        ax3.scatter(range(len(dpos)), dpos+1, c=[self.rules_cmap[rule] for rule in rules], zorder=2)
+            ax3.vlines(x=trial_centers[i], ymin=0, ymax=y, color="tab:gray", linewidth=0.9, zorder=1, alpha=0.5)
+        ax3.scatter(trial_centers, dpos, c=[self.rules_cmap[rule] for rule in rules], zorder=2)
         ax3.set_ylabel("deviant location")
         ax3.set_xlabel("trials")
-        ax3.set_xlim(0, len(dpos)-1)
-        ax3.set_ylim(1, 8)
+        ax3.set_ylim(0, 7) # but exclude tick for 8:
+        ax3.set_yticks(range(0, 8))
         ax3.yaxis.set_major_locator(MaxNLocator(integer=True))
-        ax3.set_xticks(range(len(dpos)))
         handles = [plt.Line2D([0], [0], marker="o", color="w", markerfacecolor=color, markersize=10) for color in self.rules_cmap.values()]
         labels = self.rules_cmap.keys()
         ax3.legend(handles, labels, title="rule", loc='lower left')
-        # ax3.set_xticks(np.arange(0, self.N_blocks + 1, 50))
-        ax3.set_xticks(np.arange(0, self.N_blocks * self.N_tones + 1, 50)/self.N_tones, labels=np.arange(0, self.N_blocks * self.N_tones + 1, 50))
+        ax3.set_xticks(np.arange(0, self.N_blocks * self.N_tones + 1, 50))
+        # Remove borders while keeping axes:
+        ax3.spines['top'].set_visible(False)
+        ax3.spines['right'].set_visible(False)
 
         if plot_dpos_dist:
             # Histogram subplot: dpos distributions
@@ -1507,24 +1513,24 @@ class HierarchicalAuditGM(AuditGenerativeModel):
             rules_array = np.array(rules)
             
             # Filter out None values for KDE calculations (convert to float)
-            dpos_all_clean = np.array([x for x in dpos_array if x is not None], dtype=float)
+            # dpos_all_clean = np.array([x for x in dpos_array if x is not None], dtype=float)
             dpos_rule0_clean = np.array([x for i, x in enumerate(dpos_array) if x is not None and rules_array[i] == 0], dtype=float)
             dpos_rule1_clean = np.array([x for i, x in enumerate(dpos_array) if x is not None and rules_array[i] == 1], dtype=float)
-            
+
             # Create histograms with KDE for each group
-            y_range = np.linspace(1, 8, 100)
-            
+            y_range = np.linspace(0, 7, 100)
+
             # All dpos histogram
-            if len(dpos_all_clean) > 0:
-                ax3_hist.hist(dpos_all_clean, bins=7, range=(1, 8), orientation='horizontal', alpha=0.3, 
-                            color='gray', label='All', density=True, edgecolor='black', linewidth=0.5, align='mid')
-                if len(dpos_all_clean) > 1:
-                    kde_all = ss.gaussian_kde(dpos_all_clean)
-                    ax3_hist.plot(kde_all(y_range), y_range, color='gray', linewidth=2, linestyle='--', alpha=0.7)
-            
+            # if len(dpos_all_clean) > 0:
+            #     ax3_hist.hist(dpos_all_clean, bins=7, range=(0, 7), orientation='horizontal', alpha=0.3,
+            #                 color='gray', label='All', density=True, edgecolor='black', linewidth=0.5, align='mid')
+            #     if len(dpos_all_clean) > 1:
+            #         kde_all = ss.gaussian_kde(dpos_all_clean)
+            #         ax3_hist.plot(kde_all(y_range), y_range, color='gray', linewidth=2, linestyle='--', alpha=0.7)
+
             # Rule 0 histogram
             if len(dpos_rule0_clean) > 0:
-                ax3_hist.hist(dpos_rule0_clean, bins=7, range=(1, 8), orientation='horizontal', alpha=0.3, 
+                ax3_hist.hist(dpos_rule0_clean, bins=8, range=(-0.5, 7.5), orientation='horizontal', alpha=0.3,
                             color=self.rules_cmap[0], label='Rule 0', density=True, edgecolor='black', linewidth=0.5, align='mid')
                 if len(dpos_rule0_clean) > 1:
                     kde_rule0 = ss.gaussian_kde(dpos_rule0_clean)
@@ -1532,7 +1538,7 @@ class HierarchicalAuditGM(AuditGenerativeModel):
             
             # Rule 1 histogram
             if len(dpos_rule1_clean) > 0:
-                ax3_hist.hist(dpos_rule1_clean, bins=7, range=(1, 8), orientation='horizontal', alpha=0.3, 
+                ax3_hist.hist(dpos_rule1_clean, bins=8, range=(-0.5, 7.5), orientation='horizontal', alpha=0.3,
                             color=self.rules_cmap[1], label='Rule 1', density=True, edgecolor='black', linewidth=0.5, align='mid')
                 if len(dpos_rule1_clean) > 1:
                     kde_rule1 = ss.gaussian_kde(dpos_rule1_clean)
@@ -1541,6 +1547,9 @@ class HierarchicalAuditGM(AuditGenerativeModel):
             ax3_hist.set_xlabel("Empirical density")
             ax3_hist.legend(loc='upper left', fontsize=8)
             ax3_hist.set_xlim(0, ax3_hist.get_xlim()[1])
+            # Remove borders while keeping axes:
+            ax3_hist.spines['top'].set_visible(False)
+            ax3_hist.spines['right'].set_visible(False)
 
         # Right subplot: transition matrix pi_rules
         if pi_rules is not None:

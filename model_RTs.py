@@ -67,6 +67,39 @@ def _sigma_r_suffix(sigma_r):
     return "" if sigma_r is None else f"_sigma_r_{sigma_r}"
 
 
+# Context index -> label used in the fitted-parameter column names. The KF runs a separate
+# per-context filter (see kalman_online_fit_predict_multicontext), so each context carries its
+# own fitted A, Q, H, R.
+_KF_CTX_NAMES = ('std', 'dev')
+
+
+def _kf_param_columns(kf_params):
+    """Flatten the per-timestep, per-context fitted KF parameters into named 1D columns.
+
+    `kf_params` is the dict returned by
+    ``kalman_online_fit_predict_multicontext(..., return_params=True)``: arrays indexed
+    ``[t, c, ...]`` with A, Q -> (T, C, 2, 2); H -> (T, C, 1, 2); R -> (T, C, 1, 1).
+
+    Returns a dict ``{column_name: array of length T}`` in a stable order. Column names carry
+    the context label and the matrix entry, e.g. ``A_std_01``, ``Q_dev_11``, ``H_std_0``,
+    ``R_dev``. NOTE ``R`` is the fitted observation-noise VARIANCE, so compare it against the
+    true ``sigma_r`` SQUARED (not sigma_r itself). Entries are NaN before a context warms up.
+    """
+    A, Q, H, R = kf_params['A'], kf_params['Q'], kf_params['H'], kf_params['R']
+    n_ctx = A.shape[1]
+    cols = {}
+    for c in range(n_ctx):
+        ctx = _KF_CTX_NAMES[c] if c < len(_KF_CTX_NAMES) else str(c)
+        for i in range(A.shape[2]):
+            for j in range(A.shape[3]):
+                cols[f'A_{ctx}_{i}{j}'] = A[:, c, i, j]
+                cols[f'Q_{ctx}_{i}{j}'] = Q[:, c, i, j]
+        for j in range(H.shape[3]):
+            cols[f'H_{ctx}_{j}'] = H[:, c, 0, j]
+        cols[f'R_{ctx}'] = R[:, c, 0, 0]
+    return cols
+
+
 def compute_likelihoods_at_deviants(trials_path, sub, sess, results_save_path=None, sigma_r=None):
     """
     Compute Kalman filter predictions, and predictions & likelihoods at deviant positions.
@@ -140,8 +173,8 @@ def compute_likelihoods_at_deviants(trials_path, sub, sess, results_save_path=No
         # So far just run multi-context KF:
         # NOTE on units: sigma_pred is a STANDARD DEVIATION (_aggregate_contexts sqrts it), but
         # per_ctx_var holds VARIANCES. Keep the two straight -- they are named accordingly here.
-        mu_pred, sigma_pred, kfs_fitted, per_ctx_mu_pred, per_ctx_var = kalman_online_fit_predict_multicontext(
-            observations, ctx_probabilities, n_iter=5, return_per_ctx=True, observation_noise=observation_noise
+        mu_pred, sigma_pred, kfs_fitted, per_ctx_mu_pred, per_ctx_var, kf_params = kalman_online_fit_predict_multicontext(
+            observations, ctx_probabilities, n_iter=5, return_per_ctx=True, return_params=True, observation_noise=observation_noise
         )
         per_ctx_var_std = per_ctx_var[:, 0]
         per_ctx_var_dev = per_ctx_var[:, 1]
@@ -157,7 +190,15 @@ def compute_likelihoods_at_deviants(trials_path, sub, sess, results_save_path=No
         results['mu_pred_dev'].append(per_ctx_mu_pred[:, 1])
         results['sigma_pred_dev'].append(np.sqrt(per_ctx_var_dev))
 
-        # Note: 
+        # Fitted KF parameters (A, Q, H, R) at every timestep, one set per context. These let
+        # us check R against the true observation noise: it is held at sigma_r**2 when sigma_r
+        # is supplied, and EM-estimated (free to drift) when it is None. R is a VARIANCE; the
+        # other params are dimensionless / state-scale. See _kf_param_columns for the naming.
+        run_param_cols = _kf_param_columns(kf_params)
+        for col, values in run_param_cols.items():
+            results.setdefault(col, []).append(values)
+
+        # Note:
         # - First MIN_OBS_FOR_EM + 1 predictions are np.nan
         # - So per_ctx_mu_pred[:MIN_OBS_FOR_EM + 1, 0] and per_ctx_mu_pred[:8*(MIN_OBS_FOR_EM)+(dpos[0]+1), 1] are np.nan
         
@@ -194,6 +235,11 @@ def compute_likelihoods_at_deviants(trials_path, sub, sess, results_save_path=No
         results_devpos['likelihood_obs_std_at_dev'].append(likelihood_obs_std_at_dev)
         results_devpos['likelihood_obs_dev_at_dev'].append(likelihood_obs_dev_at_dev)
         results_devpos['dpos'].append(run['dpos'][contexts].values)
+
+        # The same fitted parameters, restricted to the deviant timesteps this file is about
+        # (suffixed `_at_dev`, like the prediction/likelihood columns above).
+        for col, values in run_param_cols.items():
+            results_devpos.setdefault(f'{col}_at_dev', []).append(values[contexts.values])
 
     ## Concatenate results across runs
     # Predictions over entire sequences
@@ -1585,6 +1631,9 @@ def _per_run_model_grid(groups, trials_path, logfiles_path, preds_liks_path, lea
         p = axs[row, 0].get_position()
         fig.text(label_x, p.y0 + p.height / 2, m['name'], fontsize=10, rotation=90,
                  va='center', ha='center', color=colors[row])
+        # y-axis label on the FIRST column only (the rows already carry their model name further
+        # left) -- names the RT transform once per row so the scatter's y is unambiguous.
+        axs[row, 0].set_ylabel("logRT" if logrt else "RT (s)", fontsize=8, labelpad=2)
 
     def _band_centre(group):
         p0 = axs[0, group[0]['col']].get_position()
@@ -1611,11 +1660,16 @@ def _per_run_model_grid(groups, trials_path, logfiles_path, preds_liks_path, lea
     # Light dotted separators between consecutive session blocks, so each tier-2 band visually
     # owns its n_run columns. For a one-session-per-subject cohort these coincide with the
     # subject boundaries. Drawn in FIGURE coordinates (the gap between columns belongs to no
-    # axes), spanning the grid and stopping just under the session band.
-    sep_top = 0.905
+    # axes), spanning the grid upward. A separator that also divides two DIFFERENT subjects is
+    # taken all the way up to the tier-3 "Subject ..." band (0.955); a within-subject session
+    # separator stops just under the tier-2 session band (0.905).
+    session_sep_top = 0.905
+    subject_sep_top = 0.955
     sep_bottom = axs[-1, 0].get_position().y0
     for start in range(n_run, n_cols, n_run):
         x = (axs[0, start - 1].get_position().x1 + axs[0, start].get_position().x0) / 2
+        crosses_subject = col_meta[start]['sub'] != col_meta[start - 1]['sub']
+        sep_top = subject_sep_top if crosses_subject else session_sep_top
         fig.add_artist(Line2D([x, x], [sep_bottom, sep_top], transform=fig.transFigure,
                               color='gray', linestyle='--', linewidth=1, zorder=0))
 
@@ -1631,12 +1685,182 @@ def _per_run_model_grid(groups, trials_path, logfiles_path, preds_liks_path, lea
                  va='bottom', ha='center')
         start = end
 
+    # Global x-axis label for the shared likelihood axis (suptitle-style, but at the bottom).
+    fig.supxlabel("log likelihood" if loglik else "likelihood", fontsize=16, y=0.02)
+
     save_name = (f"{comparison_save_path}/{save_stem}_{n_cols}cols"
                  f"{'_loglik' if loglik else ''}{'_logrt' if logrt else ''}{save_suffix}"
                  f"{'_correcttrials' if correcttrials else ''}.png")
     plt.savefig(save_name, dpi=150)
     print(f"Saved fig as {save_name}")
     return save_name
+
+
+def _per_subject_model_grid(subject_specs, trials_path, logfiles_path, preds_liks_path,
+                            leaky_preds_path, pi_rule, comparison_save_path, save_stem,
+                            save_suffix='', logrt=True, loglik=False,
+                            leaky_file_prefix='leaky_predictions', figsize=None,
+                            correcttrials=False):
+    """Per-model grid with ONE column per subject, POOLING all of that subject's runs/sessions.
+
+    The subject-wise analogue of `_per_run_model_grid`: same PER_RUN_MODELS rows and the same
+    RT-vs-likelihood scatter + regression + Pearson-rho readout, but where the per-run engine gives
+    each (subject, session, run) its own column, this one collapses every trial a subject
+    contributed -- across ALL its sessions and runs -- into a single column. With 3 subjects the
+    grid is therefore 8 x 3, and each cell's scatter pools that subject's ~hundreds of deviant
+    trials rather than the ~55 of one run.
+
+    `subject_specs` is the column layout, in order -- one entry per subject/column, each a dict:
+        sub       subject id, shown in the column band
+        sessions  list of {'sess_num', 'noise_kwargs'} dicts, one per session to pool for this
+                  subject. `noise_kwargs` selects that session's KF prediction file (e.g.
+                  {'sigma_r': si_r}), so -- exactly as in the per-run figure -- each session's
+                  likelihoods are the ones computed with its OWN true observation noise; pooling
+                  them is the "individual observation noise" strategy carried up to the subject.
+
+    correcttrials: if True, narrow the trial selection from "valid RT" to "valid RT AND the
+    deviant's position correctly identified" (see `_correct_dpos_mask`), and append a
+    '_correcttrials' suffix to the saved figure name.
+    """
+    n_cols = len(subject_specs)
+    n_rows = len(PER_RUN_MODELS)
+    if figsize is None:
+        # Scale to the (usually few) subject columns rather than the 48-column per-run default.
+        figsize = (2.6 * n_cols + 1.8, 1.55 * n_rows + 1.4)
+
+    # sharey=True: RT (y) is comparable everywhere, so one shared y-scale. x is NOT shared -- each
+    # subject's pooled likelihood range differs (different session si_r mixes), so every subplot
+    # autoscales to its own spread, as in `_per_run_model_grid`.
+    fig, axs = plt.subplots(n_rows, n_cols, figsize=figsize, sharey=True, sharex=False,
+                            squeeze=False)
+    colors = sns.color_palette('tab10', n_rows)
+    # Left margin and row-label x, specified in INCHES then converted to figure fractions, so the
+    # physical left spacing is stable whatever the (narrow) figure width works out to.
+    left_frac = 1.12 / figsize[0]
+    label_x = 0.49 / figsize[0]
+
+    col_meta = []          # per column, for the subject band placed afterwards
+    all_y = []             # every plotted y, for one robust shared y-limit (sharey=True)
+
+    for col, spec in enumerate(tqdm(subject_specs, desc="Subject")):
+        sub = spec['sub']
+
+        # Pool every session/run of this subject. Each session is loaded with its OWN noise_kwargs
+        # (its true si_r) and trial-filtered exactly as the per-run engine does, THEN concatenated
+        # -- so the pooled column mixes sessions only after each has contributed the same trials it
+        # would have shown as its own per-run columns.
+        kf_parts, li_parts = [], []
+        for s in spec['sessions']:
+            df_kf = aggregate_data(trials_path, logfiles_path, sub, s['sess_num'], preds_liks_path,
+                                   pi_rule, **s['noise_kwargs'])
+            df_li = aggregate_data(trials_path, logfiles_path, sub, s['sess_num'], leaky_preds_path,
+                                   pi_rule, file_prefix=leaky_file_prefix)
+            kf_parts.append(_prep_rt_frame(df_kf, logrt=logrt, correcttrials=correcttrials))
+            li_parts.append(_prep_rt_frame(df_li, logrt=logrt, correcttrials=correcttrials))
+        df_kf = pd.concat(kf_parts, ignore_index=True)
+        df_li = pd.concat(li_parts, ignore_index=True)
+        col_meta.append({'sub': sub, 'n_sess': len(spec['sessions'])})
+
+        for row, m in enumerate(PER_RUN_MODELS):
+            ax = axs[row, col]
+            d = df_kf if m['src'] == 'kf' else df_li
+            x = d[m['col']].to_numpy(dtype=float)
+            y = d['rt'].to_numpy(dtype=float)
+            mask = np.isfinite(x) & np.isfinite(y)
+            x, y = x[mask], y[mask]
+            if loglik:
+                pos = x > 0  # log(0) -> -inf; drop non-positive likelihoods/priors
+                x, y = np.log(x[pos]), y[pos]
+
+            if len(x):
+                all_y.append(y)
+            if len(x) >= 2:
+                sns.regplot(x=x, y=y, ax=ax, color=colors[row],
+                            scatter_kws={'s': 5, 'alpha': 0.2},
+                            line_kws={'linewidth': 1.4})
+                if len(x) >= 3 and np.std(x) > 0 and np.std(y) > 0:
+                    r, p = ss.pearsonr(x, y)
+                    _rho_stars_annotation(ax, r, p, fontsize=9)
+                # Pooled trial count -- now a meaningful per-cell quantity (the per-run figure's
+                # cells all held ~one run), so report it in the lower-right corner.
+                ax.text(0.97, 0.03, f"n={len(x)}", transform=ax.transAxes, fontsize=6.5,
+                        va='bottom', ha='right', color='dimgray')
+            ax.tick_params(labelsize=7, length=2)
+            ax.xaxis.set_major_locator(MaxNLocator(nbins=3, prune='both'))
+            ax.spines['top'].set_visible(False)
+            ax.spines['right'].set_visible(False)
+
+    # Robust shared y-limit (RT), matching the per-run engine, so a few outlier RTs don't compress
+    # every subplot; sharey=True propagates it from axs[0, 0].
+    if all_y:
+        y_all = np.concatenate(all_y)
+        ylo, yhi = np.nanpercentile(y_all, [0.5, 99.5])
+        if yhi > ylo:
+            axs[0, 0].set_ylim(ylo, yhi)
+
+    # Finalise geometry before reading axes positions for the subject band. Only ONE tier of column
+    # header here (the subject), so less top headroom is needed than the per-run 3-tier grid.
+    plt.subplots_adjust(left=left_frac, right=0.985, top=0.92, bottom=0.06, wspace=0.28, hspace=0.4)
+
+    # --- Row labels (left): one model name per row, in its row colour, plus the RT-transform label
+    # on the first column only -- identical convention to `_per_run_model_grid`.
+    for row, m in enumerate(PER_RUN_MODELS):
+        p = axs[row, 0].get_position()
+        fig.text(label_x, p.y0 + p.height / 2, m['name'], fontsize=10, rotation=90,
+                 va='center', ha='center', color=colors[row])
+        axs[row, 0].set_ylabel("logRT" if logrt else "RT (s)", fontsize=8, labelpad=2)
+
+    # --- Column header (single tier): the subject, centred over its column.
+    for col, meta in enumerate(col_meta):
+        p = axs[0, col].get_position()
+        fig.text((p.x0 + p.x1) / 2, 0.945, f"Subject {meta['sub']}", fontsize=13,
+                 va='bottom', ha='center')
+
+    fig.supxlabel("log likelihood" if loglik else "likelihood", fontsize=14, y=0.02)
+
+    save_name = (f"{comparison_save_path}/{save_stem}_{n_cols}cols"
+                 f"{'_loglik' if loglik else ''}{'_logrt' if logrt else ''}{save_suffix}"
+                 f"{'_correcttrials' if correcttrials else ''}.png")
+    plt.savefig(save_name, dpi=150)
+    print(f"Saved fig as {save_name}")
+    return save_name
+
+
+def compare_likelihoods_with_RTs_per_subject_models(subjects, trials_path, preds_liks_path, logfiles_path, comparison_save_path, pi_rule, leaky_preds_path, logrt=True, loglik=False, sigma_r_files=True, figsize=None, correcttrials=False):
+    """Per-model grid with one POOLED column per subject (subject-wise `compare_..._per_run_models`).
+
+    Same 8 model rows as `compare_likelihoods_with_RTs_per_run_models`, but instead of one column
+    per (subject, session, run) it draws one column per subject, pooling ALL of that subject's
+    deviant trials across its sessions and runs. With 3 subjects that is an 8 x 3 grid.
+
+    As in the per-run figure, each session's KF likelihoods are those computed with that session's
+    TRUE observation noise (its si_r); `sigma_r_files` selects the current `_sigma_r_{si_r}`
+    filename generation (True) vs the legacy `_obs_noise_{...}` folders. Pooling therefore combines,
+    within a subject, trials whose KF likelihoods each used their own session's noise.
+
+    correcttrials: if True, keep only trials with a valid RT AND the deviant's position correctly
+    identified; the figure name then carries a '_correcttrials' suffix.
+    """
+    session_types, session_type_to_params = get_session_types(trials_path)
+
+    subject_specs = []
+    for sub in subjects:
+        sessions = []
+        for session_type in session_types:
+            d_par, si_stat, si_r = session_type
+            if sub not in session_type_to_params.get(session_type, {}):
+                print(f"Warning: No data for subject {sub} in session type {session_type}")
+                continue
+            sessions.append({
+                'sess_num': session_type_to_params[session_type][sub],  # 1-indexed
+                'noise_kwargs': {'sigma_r': si_r} if sigma_r_files else {'obs_noise': si_r},
+            })
+        subject_specs.append({'sub': sub, 'sessions': sessions})
+
+    return _per_subject_model_grid(
+        subject_specs, trials_path, logfiles_path, preds_liks_path, leaky_preds_path, pi_rule,
+        comparison_save_path, save_stem='RT_persubject_8models', save_suffix='_indivobsnoise',
+        logrt=logrt, loglik=loglik, figsize=figsize, correcttrials=correcttrials)
 
 
 def compare_likelihoods_with_RTs_per_run_models(subjects, trials_path, preds_liks_path, logfiles_path, comparison_save_path, pi_rule, leaky_preds_path, n_run=4, logrt=True, loglik=False, sigma_r_files=True, figsize=(35, 12), correcttrials=False):
@@ -2176,19 +2400,29 @@ def collect_perrun_models_R2_single_session(subjects, trials_path, preds_liks_pa
         correcttrials=correcttrials)
 
 
-def _plot_perrun_models_R2_violins(df, comparison_save_path, save_stem, save_suffix='',
-                                   logrt=True, loglik=False):
-    """Shared engine for the R2 violins: one violin per model of its per-run R2 distribution.
+def _draw_perrun_models_R2_violins_on_ax(ax, df, logrt=True, loglik=False,
+                                         order=None, palette=None, show_xticklabels=True):
+    """Draw the one-violin-per-model R2 summary onto a single Axes.
 
-    `df` is a table from `_collect_perrun_models_R2` (either cohort); everything below depends
-    only on its `model` and `R2` columns, so the figure is identical in construction whether the
-    R2 values come from 48 runs (04/05/06) or 12 (11/12/13).
+    This is the per-ax body extracted from `_plot_perrun_models_R2_violins`: for the models in
+    `order` (default PER_RUN_MODELS), a coloured violin of the `R2` column, the individual
+    per-run R2 points as a strip, and a white-diamond mean marker per model, plus the axis
+    labels / y-limit / spine styling. Only the Axes is touched -- no figure creation, no
+    tight_layout, no savefig -- so the same routine styles the single all-subjects panel and
+    each subject's panel in the stacked per-subject figure.
+
+    `order` and `palette` are accepted so a multi-panel figure can share one model order and one
+    colour mapping across panels. `show_xticklabels=False` hides (but keeps) the model tick
+    labels, for every panel above the bottom one in a stacked figure.
+
+    Returns the per-model run counts (a list aligned with `order`).
     """
-    order = [m['name'] for m in PER_RUN_MODELS]
-    colors = sns.color_palette('tab10', len(order))
-    palette = dict(zip(order, colors))
+    if order is None:
+        order = [m['name'] for m in PER_RUN_MODELS]
+    if palette is None:
+        colors = sns.color_palette('tab10', len(order))
+        palette = dict(zip(order, colors))
 
-    fig, ax = plt.subplots(figsize=(12, 6))
     # hue=x + legend=False is the seaborn>=0.12 way to colour one violin per category.
     # cut=0 keeps the KDE inside the observed range (R2 is bounded at 0, no negative tail).
     sns.violinplot(data=df, x='model', y='R2', order=order, hue='model', hue_order=order,
@@ -2205,27 +2439,72 @@ def _plot_perrun_models_R2_violins(df, comparison_save_path, save_stem, save_suf
         if len(vals):
             ax.scatter([i], [vals.mean()], marker='D', s=32, color='white',
                        edgecolor='black', zorder=5)
-    # One n note if every model contributes the same number of runs; otherwise annotate each.
-    if len(set(counts)) == 1:
-        ax.text(0.995, 0.98, f"N = {counts[0]} runs / model", transform=ax.transAxes,
-                ha='right', va='top', fontsize=9)
-    else:
-        for i, n in enumerate(counts):
-            ax.text(i, -0.12, f"n={n}", ha='center', va='top', fontsize=8, color='0.3',
-                    transform=ax.get_xaxis_transform())
 
     ax.set_xlabel('')
     ylab = 'R$^2$ (per-run RT vs. ' + ('log-' if loglik else '') + 'likelihood)'
     ax.set_ylabel(ylab, fontsize=11)
-    n_cells = len(df) // max(len(order), 1)
-    ax.set_title(
-        f"Models goodness-of-fit measure ($R^2=\\rho^2$)",
-        fontsize=12,
-    )
     ax.set_ylim(bottom=0)
-    plt.setp(ax.get_xticklabels(), rotation=25, ha='right')
+    if show_xticklabels:
+        plt.setp(ax.get_xticklabels(), rotation=25, ha='right')
+    else:
+        ax.tick_params(labelbottom=False)  # keep the ticks/locator, hide the model names
     ax.spines['top'].set_visible(False)
     ax.spines['right'].set_visible(False)
+    return counts
+
+
+def _plot_perrun_models_R2_violins(df, comparison_save_path, save_stem, save_suffix='',
+                                   logrt=True, loglik=False):
+    """Shared engine for the R2 violins: one violin per model of its per-run R2 distribution.
+
+    `df` is a table from `_collect_perrun_models_R2` (either cohort); everything below depends
+    only on its `model` and `R2` columns, so the figure is identical in construction whether the
+    R2 values come from 48 runs (04/05/06) or 12 (11/12/13).
+    """
+    fig, ax = plt.subplots(figsize=(12, 6))
+    _draw_perrun_models_R2_violins_on_ax(ax, df, logrt=logrt, loglik=loglik)
+    plt.tight_layout()
+
+    save_name = (f"{comparison_save_path}/{save_stem}"
+                 f"{'_loglik' if loglik else ''}{'_logrt' if logrt else ''}{save_suffix}.png")
+    plt.savefig(save_name, dpi=150)
+    print(f"Saved fig as {save_name}")
+    return save_name
+
+
+def _plot_perrun_models_R2_violins_per_subject(df, comparison_save_path, save_stem, save_suffix='',
+                                               logrt=True, loglik=False, subjects=None):
+    """Per-subject version of `_plot_perrun_models_R2_violins`: one stacked panel per subject.
+
+    Instead of pooling every (subject, session, run) R2 into one set of violins, this draws N
+    panels stacked vertically (N = number of subjects), each showing that subject's own
+    one-violin-per-model R2 distribution. Panels share the model x-axis and a common y-range,
+    and the shared per-ax styling comes from `_draw_perrun_models_R2_violins_on_ax`, so every
+    subject's panel is drawn exactly like the all-subjects figure.
+
+    `subjects` fixes the panel order (top to bottom); default is the sorted `sub` values in `df`.
+    """
+    order = [m['name'] for m in PER_RUN_MODELS]
+    colors = sns.color_palette('tab10', len(order))
+    palette = dict(zip(order, colors))
+
+    if subjects is None:
+        subjects = sorted(df['sub'].unique())
+    n = len(subjects)
+
+    # sharey so the R2 scale is comparable across subjects; sharex so only the bottom panel
+    # carries the (rotated) model names.
+    fig, axes = plt.subplots(n, 1, figsize=(12, 3.2 * n), sharex=True, sharey=True,
+                             squeeze=False)
+    axes = axes[:, 0]
+
+    for k, (sub, ax) in enumerate(zip(subjects, axes)):
+        sub_df = df[df['sub'] == sub]
+        _draw_perrun_models_R2_violins_on_ax(
+            ax, sub_df, logrt=logrt, loglik=loglik, order=order, palette=palette,
+            show_xticklabels=(k == n - 1))
+        ax.set_title(f"subject {sub}", fontsize=11, loc='left')
+
     plt.tight_layout()
 
     save_name = (f"{comparison_save_path}/{save_stem}"
@@ -2261,6 +2540,32 @@ def plot_perrun_models_R2_violins(subjects, trials_path, preds_liks_path, logfil
         df, comparison_save_path, save_stem='RT_perrun_8models_R2_violins',
         save_suffix='_indivobsnoise' + ('_correcttrials' if correcttrials else ''),
         logrt=logrt, loglik=loglik)
+    return save_name, df
+
+
+def plot_perrun_models_R2_violins_per_subject(subjects, trials_path, preds_liks_path,
+                                              logfiles_path, comparison_save_path, pi_rule,
+                                              leaky_preds_path, n_run=4, logrt=True, loglik=False,
+                                              sigma_r_files=True, correcttrials=False):
+    """Per-subject stacked version of `plot_perrun_models_R2_violins`.
+
+    Collects the exact same per-(subject, session, run, model) R2 table (04/05/06 cohort), then
+    instead of pooling every subject into one set of violins, draws one stacked panel of violins
+    per subject (each panel = that subject's own per-run R2 distribution across its sessions and
+    runs). See `_plot_perrun_models_R2_violins_per_subject`.
+
+    correcttrials: as in `plot_perrun_models_R2_violins`, restricts the underlying per-run fits to
+    correctly localised deviants and appends a '_correcttrials' suffix to the figure name.
+    """
+    df = collect_perrun_models_R2(
+        subjects, trials_path, preds_liks_path, logfiles_path, pi_rule, leaky_preds_path,
+        n_run=n_run, logrt=logrt, loglik=loglik, sigma_r_files=sigma_r_files,
+        correcttrials=correcttrials,
+    )
+    save_name = _plot_perrun_models_R2_violins_per_subject(
+        df, comparison_save_path, save_stem='RT_perrun_8models_R2_violins_persubject',
+        save_suffix='_indivobsnoise' + ('_correcttrials' if correcttrials else ''),
+        logrt=logrt, loglik=loglik, subjects=subjects)
     return save_name, df
 
 
@@ -2301,8 +2606,7 @@ def _cohens_d_paired(a, b):
     R2 vectors are paired run-by-run (same runs, same trials), but the pooled-SD d we report is
     the standard between-distributions effect size -- it measures how far apart the two R2
     *distributions* sit, which is what the heatmap is about. The pairing is instead carried by
-    the Wilcoxon signed-rank p-value that labels each cell. (A paired d_z = mean(diff)/sd(diff)
-    would answer a different, 'how consistent is the sign' question.)
+    the Wilcoxon signed-rank p-value that labels each cell.
     """
     a = np.asarray(a, dtype=float)
     b = np.asarray(b, dtype=float)
@@ -2313,14 +2617,15 @@ def _cohens_d_paired(a, b):
     return (a.mean() - b.mean()) / s_pooled
 
 
-def _plot_model_R2_cohensd_heatmap(df, comparison_save_path, save_stem, save_suffix='',
-                                   logrt=True, loglik=False):
-    """Shared engine for the pairwise Cohen's d heatmap; `df` comes from `_collect_perrun_models_R2`.
+def _model_R2_cohensd_matrices(df, order):
+    """Pairwise Cohen's d / Wilcoxon matrices between models' per-run R2, paired by run identity.
 
-    Depends only on the R2 values and the run identity used to pair them, so it serves either
-    cohort unchanged.
+    Extracted from `_plot_model_R2_cohensd_heatmap` so the single-panel and per-subject figures
+    build their cells identically. Returns (D, P, N): the signed Cohen's d ("row minus column",
+    antisymmetric off the diagonal), the two-sided Wilcoxon signed-rank p-value (symmetric), and
+    the paired sample size actually used per cell. The diagonal and any pair with fewer than 2
+    shared runs stay NaN in D and P.
     """
-    order = [m['name'] for m in PER_RUN_MODELS]
     # Align R2 by run identity (sub, session, run) so model columns are paired row-by-row. The key
     # is `run_n`, not tau_std: tau_std does not identify a run uniquely in every cohort (subject 12
     # has two tau=240 runs), and collapsing those two runs would silently average them away.
@@ -2348,14 +2653,25 @@ def _plot_model_R2_cohensd_heatmap(df, comparison_save_path, save_stem, save_suf
                 # halves are shown so a model's full row can be read left-to-right.
                 D[j, i] = -D[i, j]
                 P[j, i] = P[i, j]
+    return D, P, N
 
-    # Symmetric diverging scale centred on 0 so colour direction reads as "who fits better".
-    vmax = np.nanmax(np.abs(D)) if np.isfinite(D).any() else 1.0
+
+def _draw_model_R2_cohensd_heatmap_on_ax(ax, D, P, order, vmax, show_yticklabels=True):
+    """Draw one pairwise Cohen's d heatmap (cells + labels + ticks) onto a single Axes.
+
+    The per-ax body extracted from `_plot_model_R2_cohensd_heatmap`: the diverging imshow of the
+    signed d matrix `D` on a symmetric scale +/-`vmax` (red = the row model fits RT better, blue =
+    the column), each finite cell overlaid with its d value and the Wilcoxon stars from `P`. No
+    figure, colorbar or savefig -- the caller owns those and passes a shared `vmax` so several
+    panels stay colour-comparable. `show_yticklabels=False` hides the model names on the y-axis,
+    for every panel except the leftmost in a horizontal strip. Returns the AxesImage so the caller
+    can hang a shared colorbar off it.
+    """
+    n = len(order)
     Dm = np.ma.masked_invalid(D)
     cmap = plt.get_cmap('RdBu_r').copy()
     cmap.set_bad('white')  # blank diagonal (and any pair with too few shared runs)
 
-    fig, ax = plt.subplots(figsize=(9.5, 8))
     im = ax.imshow(Dm, cmap=cmap, vmin=-vmax, vmax=vmax)
 
     # Per-cell label: signed d value (normal weight) with the significance stars stacked below in
@@ -2374,22 +2690,46 @@ def _plot_model_R2_cohensd_heatmap(df, comparison_save_path, save_stem, save_suf
     ax.set_xticks(range(n))
     ax.set_yticks(range(n))
     ax.set_xticklabels(order, rotation=30, ha='right', fontsize=9)
-    ax.set_yticklabels(order, fontsize=9)
+    if show_yticklabels:
+        ax.set_yticklabels(order, fontsize=9)
+    else:
+        ax.set_yticklabels([])
     # Thin white cell borders (imshow draws no grid of its own).
     ax.set_xticks(np.arange(-0.5, n, 1), minor=True)
     ax.set_yticks(np.arange(-0.5, n, 1), minor=True)
     ax.grid(which='minor', color='white', linewidth=1.5)
     ax.tick_params(which='minor', length=0)
+    for spine in ax.spines.values():
+        spine.set_visible(False)
+    return im
+
+
+def _plot_model_R2_cohensd_heatmap(df, comparison_save_path, save_stem, save_suffix='',
+                                   logrt=True, loglik=False):
+    """Shared engine for the pairwise Cohen's d heatmap; `df` comes from `_collect_perrun_models_R2`.
+
+    Depends only on the R2 values and the run identity used to pair them, so it serves either
+    cohort unchanged.
+    """
+    order = [m['name'] for m in PER_RUN_MODELS]
+    D, P, N = _model_R2_cohensd_matrices(df, order)
+
+    # Symmetric diverging scale centred on 0 so colour direction reads as "who fits better".
+    vmax = np.nanmax(np.abs(D)) if np.isfinite(D).any() else 1.0
+
+    fig, ax = plt.subplots(figsize=(9.5, 8))
+    im = _draw_model_R2_cohensd_heatmap_on_ax(ax, D, P, order, vmax)
 
     cbar = fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
-    cbar.set_label("Cohen's d  (row − column):  >0 row model fits RT better", fontsize=10)
+    cbar.set_label(r"Cohen's $d$", fontsize=10) #  (row − column):  >0 row model fits RT better
+    cbar.outline.set_visible(False)
 
     n_runs = int(np.nanmax(N)) if N.any() else 0
-    ax.set_title(
-        "Pairwise separation of models' per-run $R^2$ (Cohen's d)\n"
-        f"Wilcoxon signed-rank on {n_runs} paired runs ",
-        fontsize=12,
-    )
+    # ax.set_title(
+    #     "Pairwise separation of models' per-run $R^2$ (Cohen's d)\n"
+    #     f"Wilcoxon signed-rank on {n_runs} paired runs ",
+    #     fontsize=12,
+    # )
     plt.tight_layout()
 
     save_name = (f"{comparison_save_path}/{save_stem}"
@@ -2397,6 +2737,57 @@ def _plot_model_R2_cohensd_heatmap(df, comparison_save_path, save_stem, save_suf
     plt.savefig(save_name, dpi=150)
     print(f"Saved fig as {save_name}")
     return save_name, D, P
+
+
+def _plot_model_R2_cohensd_heatmap_per_subject(df, comparison_save_path, save_stem, save_suffix='',
+                                               logrt=True, loglik=False, subjects=None):
+    """Per-subject version of `_plot_model_R2_cohensd_heatmap`: one heatmap per subject, side by side.
+
+    Instead of pooling every subject's runs into a single pairwise Cohen's d matrix, this computes
+    a separate matrix per subject (its own runs, paired within subject) and lays the N heatmaps out
+    HORIZONTALLY (N = number of subjects). All panels share one symmetric colour scale -- the
+    global max |d| across subjects -- and a single colorbar, so a cell's colour means the same in
+    every panel; only the leftmost panel carries the y-axis model names. Cells are drawn by
+    `_draw_model_R2_cohensd_heatmap_on_ax`.
+
+    `subjects` fixes the panel order (left to right); default is the sorted `sub` values in `df`.
+    Returns (save_name, D_by_sub, P_by_sub) with the per-subject matrices keyed by subject.
+    """
+    order = [m['name'] for m in PER_RUN_MODELS]
+
+    if subjects is None:
+        subjects = sorted(df['sub'].unique())
+    n_sub = len(subjects)
+
+    # Compute every subject's matrices first so the colour scale can be shared across all panels.
+    D_by_sub, P_by_sub = {}, {}
+    for sub in subjects:
+        D, P, _ = _model_R2_cohensd_matrices(df[df['sub'] == sub], order)
+        D_by_sub[sub], P_by_sub[sub] = D, P
+    finite_maxes = [np.nanmax(np.abs(D)) for D in D_by_sub.values() if np.isfinite(D).any()]
+    vmax = max(finite_maxes) if finite_maxes else 1.0
+
+    # constrained_layout handles a colorbar spanning several axes better than tight_layout.
+    fig, axes = plt.subplots(1, n_sub, figsize=(8.5 * n_sub, 8), squeeze=False,
+                             constrained_layout=True)
+    axes = axes[0]
+
+    im = None
+    for k, (sub, ax) in enumerate(zip(subjects, axes)):
+        im = _draw_model_R2_cohensd_heatmap_on_ax(
+            ax, D_by_sub[sub], P_by_sub[sub], order, vmax, show_yticklabels=(k == 0))
+        ax.set_title(f"subject {sub}", fontsize=12)
+
+    # One shared colorbar spanning all panels (they all use the same +/- vmax scale).
+    cbar = fig.colorbar(im, ax=list(axes), fraction=0.046 / n_sub, pad=0.02)
+    cbar.set_label(r"Cohen's $d$", fontsize=10) #  (row − column):  >0 row model fits RT better
+    cbar.outline.set_visible(False)
+
+    save_name = (f"{comparison_save_path}/{save_stem}"
+                 f"{'_loglik' if loglik else ''}{'_logrt' if logrt else ''}{save_suffix}.png")
+    plt.savefig(save_name, dpi=150)
+    print(f"Saved fig as {save_name}")
+    return save_name, D_by_sub, P_by_sub
 
 
 def plot_model_R2_cohensd_heatmap(subjects, trials_path, preds_liks_path, logfiles_path,
@@ -2430,6 +2821,31 @@ def plot_model_R2_cohensd_heatmap(subjects, trials_path, preds_liks_path, logfil
         df, comparison_save_path, save_stem='RT_perrun_8models_R2_cohensd_heatmap',
         save_suffix='_indivobsnoise' + ('_correcttrials' if correcttrials else ''),
         logrt=logrt, loglik=loglik)
+
+
+def plot_model_R2_cohensd_heatmap_per_subject(subjects, trials_path, preds_liks_path,
+                                              logfiles_path, comparison_save_path, pi_rule,
+                                              leaky_preds_path, n_run=4, logrt=True, loglik=False,
+                                              sigma_r_files=True, correcttrials=False):
+    """Per-subject side-by-side version of `plot_model_R2_cohensd_heatmap`.
+
+    Collects the exact same per-(subject, session, run, model) R2 table (04/05/06 cohort), then
+    instead of pooling every subject into one pairwise Cohen's d matrix, draws one heatmap per
+    subject laid out horizontally, all on a shared colour scale with a single colorbar. See
+    `_plot_model_R2_cohensd_heatmap_per_subject`.
+
+    correcttrials: as in `plot_model_R2_cohensd_heatmap`, restricts the underlying per-run fits to
+    correctly localised deviants and appends a '_correcttrials' suffix to the figure name.
+    """
+    df = collect_perrun_models_R2(
+        subjects, trials_path, preds_liks_path, logfiles_path, pi_rule, leaky_preds_path,
+        n_run=n_run, logrt=logrt, loglik=loglik, sigma_r_files=sigma_r_files,
+        correcttrials=correcttrials,
+    )
+    return _plot_model_R2_cohensd_heatmap_per_subject(
+        df, comparison_save_path, save_stem='RT_perrun_8models_R2_cohensd_heatmap_persubject',
+        save_suffix='_indivobsnoise' + ('_correcttrials' if correcttrials else ''),
+        logrt=logrt, loglik=loglik, subjects=subjects)
 
 
 def plot_model_R2_cohensd_heatmap_single_session(subjects, trials_path, preds_liks_path,
