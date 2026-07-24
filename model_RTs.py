@@ -28,9 +28,6 @@ else:
     raise ImportError("Neither 'Kalman' nor 'KalmanFilterViz1D' folder found.")
 
 
-
-
-
 def prepare_trials_data(trials_path, exclude_null=False):
     # Load generated sequences
     trials = pd.read_csv(trials_path)
@@ -258,8 +255,7 @@ def compute_likelihoods_at_deviants(trials_path, sub, sess, results_save_path=No
     })
     results_devpos.to_csv(os.path.join(results_save_path, f'kalman_predictions_and_likelihoods_at_deviants_sub-{sub}_ses-{sess}{noise_suffix}.csv'), index=False)
 
-
-
+    return results_devpos
 
 
 def get_valid_positions_per_rule():

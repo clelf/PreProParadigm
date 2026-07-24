@@ -6,3 +6,8 @@
 *.pdf
 *.svg
 *.wav
+*.nii
+*.nii.gz
+*.dcm
+*.out
+*.err
