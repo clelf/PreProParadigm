@@ -8,11 +8,14 @@ import re
 import seaborn as sns
 import matplotlib.pyplot as plt
 from itertools import combinations
+import shutil
+from pathlib import Path
 
 #---------------SUBJECT INFORMATION & CONFIG----------------#
 subject = '01' # participant number
-session = 1 # session number
-method = 'kalman' # 'activations_probs'
+session = 4 # session number
+method = 'kalman'#'kalman' # 'activations_probs'
+network = 'population_network_all_bn8_trainh0_lr0.002'#'population_network_all_bn8_trainh0_fixedsir_lr0.001'#'population_network_all_bn8_lr0.001_dposweight'
 expo = 2 # exponent for sum measure
 take_dpos = False # multiply by dpos prior?
 #-----------------------------------------------------------#
@@ -47,7 +50,7 @@ if method == 'activations_probs':
         activations_all = []
 
         # find 100 instances created for each condition assigned to the current subject and session
-        sequences = glob.glob(f"fMRI/sequences_per_condition_sub-{subject}/*/sub-seq*_cond*_tau{tau[run]}_mu{mu[run][0]}_dev{d[run]}_ses-1_trials.csv", recursive=True)
+        sequences = glob.glob(f"fMRI/sequences_per_condition_sub-{subject}_ses-{session}/*/sub-seq*_cond*_tau{tau[run]}_mu{mu[run][0]}_dev{d[run]}_ses-1_trials.csv", recursive=True)
 
         print(len(sequences))
 
@@ -58,7 +61,7 @@ if method == 'activations_probs':
             seq_n = re.findall(r"seq\d+", s)
         
             # for each sequence get corresponding model activations
-            activations = glob.glob(f"exp_seq_act_output/sub-{seq_n[0]}_cond*_tau{tau[run]}_mu{mu[run][0]}_dev{d[run]}_ses-1_run-1_trials_activations.csv")
+            activations = glob.glob(f"/Users/steinj/Documents/RNN_paradigm/RNN/{network}/activations_sub-{subject}_ses-{session}/sub-{seq_n[0]}_cond*_tau{tau[run]}_mu{mu[run][0]}_dev{d[run]}_ses-1_trials_activations.csv")
             activations_all.append(activations)
             activations = pd.read_csv(activations[0])
 
@@ -71,7 +74,7 @@ if method == 'activations_probs':
             sum_all.append(np.sum(rhos_all**expo))
 
             # load model probabilities
-            probabilities = glob.glob(f"/Users/steinj/Documents/RNN_paradigm/RNN/exp_seq_act_output_probs/population_network_all_bn8_lr0/probabilities_deviant/sub-{seq_n[0]}_cond*_tau{tau[run]}_mu{mu[run][0]}_dev{d[run]}_ses-1_run-1_trials_probabilities_deviant.csv")
+            probabilities = glob.glob(f"/Users/steinj/Documents/RNN_paradigm/RNN/{network}/probabilities_deviant_sub-{subject}_ses-{session}/sub-{seq_n[0]}_cond*_tau{tau[run]}_mu{mu[run][0]}_dev{d[run]}_ses-1_trials_probabilities_deviant.csv")
             probabilities = pd.read_csv(probabilities[0])
 
             dpos_cols = probabilities[['dpos_p0','dpos_p1','dpos_p2','dpos_p3','dpos_p4']]
@@ -79,27 +82,7 @@ if method == 'activations_probs':
             dpos_cols.plot(kind="box")
             plt.show()
 
-            probs = []
-            lik_tru_largest = []
-            
-            # check selection criteria
-            for row, dpos in enumerate(probabilities['dpos']):
-                probs.append(dpos_cols.iloc[row, dpos-2])
-
-            '''
-            # check if probability for true deviant is largest
-            for row, dpos in enumerate(probabilities['dpos']):
-                row_sel = dpos_cols.iloc[row, :]   
-                maxy = row_sel.values.argmax()
-
-                if (maxy+2) != (dpos-2):
-                    lik_tru_largest.append(0)
-                elif (maxy+2) == (dpos-2):
-                    lik_tru_largest.append(1) 
-
-            print(f"proportion true dev prob largest: {np.mean(lik_tru_largest)}") 
-            '''           
-
+            probs = probabilities['lik_dpos']
             probs = [float(x) for x in probs]
 
             for i, p in enumerate(probs):
@@ -127,14 +110,14 @@ if method == 'activations_probs':
 
 elif method == 'kalman':
 
+    selected_run = [[] for _ in range(4)]
+
     win = []
     
     for run in range(0,len(tau)):
 
-        selected_run = []
-
         # all sequences matching this run
-        sequences = glob.glob(f"fMRI/sequences_per_condition_sub-{subject}/*/sub-seq*_cond*_tau{tau[run]}_mu{mu[run][0]}_dev{d[run]}_ses-1_trials.csv", recursive=True)
+        sequences = glob.glob(f"fMRI/sequences_per_condition_sub-{subject}_ses-{session}/*/sub-seq*_cond*_tau{tau[run]}_mu{mu[run][0]}_dev{d[run]}_ses-1_trials.csv", recursive=True)
 
         # loop across possible sequences
         for n, s in enumerate(sequences):
@@ -142,33 +125,38 @@ elif method == 'kalman':
             seq_n = re.findall(r"seq\d+", s)
             
             # get kalman likelihoods
-            kalman_likelihoods = glob.glob(f"fMRI/sequences_per_condition_sub-{subject}/{seq_n[0]}_cond*_tau{tau[run]}_mu{mu[run][0]}_dev{d[run]}/results_KF*.csv") if take_dpos else glob.glob(f"fMRI/sequences_per_condition_sub-{subject}/{seq_n[0]}_cond*_tau{tau[run]}_mu{mu[run][0]}_dev{d[run]}/kalman_predictions_and_likelihoods_at_deviants_sub-{seq_n[0]}_cond*_tau{tau[run]}_mu{mu[run][0]}_dev{d[run]}_ses-1.csv")
+            kalman_likelihoods = glob.glob(f"fMRI/sequences_per_condition_sub-{subject}_ses-{session}/{seq_n[0]}_cond*_tau{tau[run]}_mu{mu[run][0]}_dev{d[run]}/results_KF*.csv") if take_dpos else glob.glob(f"fMRI/sequences_per_condition_sub-{subject}_ses-{session}/{seq_n[0]}_cond*_tau{tau[run]}_mu{mu[run][0]}_dev{d[run]}/kalman_predictions_and_likelihoods_at_deviants_sub-{seq_n[0]}_cond*_tau{tau[run]}_mu{mu[run][0]}_dev{d[run]}*.csv")
             kalman_lik_data = pd.read_csv(kalman_likelihoods[0])
 
             likelihood_std_at_dpos = kalman_lik_data['likelihood_obs_std_at_dev_over_dpos'] if take_dpos else kalman_lik_data['likelihood_obs_std_at_dev']
 
-            '''
-            # plot distribution and according to dpos
-            plt.figure()
-            likelihood_std_at_dpos.plot(kind="hist", bins=30, edgecolor="black")
-            plt.title(f"likelihood std at dev {os.path.basename(s)[:-11]}")
-            plt.xlim(0, 1.5) if take_dpos else plt.xlim(0, 2)
-            plt.show()
-
-            plt.figure()
-            plt.scatter(kalman_lik_data['dpos'],likelihood_std_at_dpos)
-            plt.ylim(-0.1, 1.5) if take_dpos else plt.ylim(0, 2)
-            plt.show()
-            '''
-
             # define exclusion criterion
-            fraction = np.mean((likelihood_std_at_dpos >= 0.9) & (likelihood_std_at_dpos <= 1.1))
+            fraction = np.mean((likelihood_std_at_dpos > 0) & (likelihood_std_at_dpos <= 1) & (np.mean(likelihood_std_at_dpos)<1.05) & (np.mean(likelihood_std_at_dpos)>0.7)) # manually determined based on data inspection for now --> exclude on the more difficult tail (>= 0.75 to <= 1.05 for the old version of the KF scripts)
+            # for the new version of the KF script add mean criterion to make mean likelihood more similar (ensure a few difficult trials in any case)
             
-            if fraction >= 0.8:
-                selected_run.append(s)
+            if fraction >= 0.78: #(0.8 for sub-01 ses-1 and 0.76 for sub-01 ses-2 and 0.75 for sub-01 ses-3)
+
+                selected_run[run].append(s)
+                print(np.mean(likelihood_std_at_dpos))
+
+
+                '''
+                plt.figure()
+                likelihood_std_at_dpos.plot(kind="hist", bins=30, edgecolor="black")
+                plt.title(f"likelihood std at dev {os.path.basename(s)[:-11]}")
+                plt.xlim(0, 1.5) if take_dpos else plt.xlim(0, 2)
+                plt.show()                
+
+                plt.figure()
+                plt.scatter(kalman_lik_data['dpos'],likelihood_std_at_dpos)
+                plt.ylim(-0.1, 1.5) if take_dpos else plt.ylim(0, 2)
+                plt.show()
+                '''
+
 
         # randomly sample from run list and append to win list
-        win.append(random.choice(selected_run))
+        print(len(selected_run[run]))
+        win.append(random.choice(selected_run[run]))
 
 
 #---------------ADD ITIS + CUES TO SELECTED SEQUENCES--------------#
@@ -260,13 +248,24 @@ for run, file in enumerate(win):
 
     cue1, cue2 = (cue_data.loc[cue_data['session'] == session, ['cue1', 'cue2']].T.values)
 
-    trial_data['cue'] = trial_data['cue'].replace({
+    if subject == '01' and session == 1: # attention: for subject one session 1, cues are reversed in generated trial lists!
+        trial_data['cue'] = trial_data['cue'].replace({
+            'cue_1': cue2[0],
+            'cue_2': cue1[0]
+        })
+    else:
+        trial_data['cue'] = trial_data['cue'].replace({
         'cue_1': cue1[0],
         'cue_2': cue2[0]
-    })
+        })
 
     # save final logfiles
-    diry = f"fMRI/selected_trial_lists_scanning/sub-{subject}/"
+    diry = f"fMRI/selected_trial_lists_scanning_sub-{subject}_ses-{session}/sub-{subject}/"
     os.makedirs(diry, exist_ok=True)
 
-    trial_data.to_csv(f"fMRI/selected_trial_lists_scanning/sub-{subject}/sub-{subject}_ses-{session+1}_run-{run+1}_trials.csv", index=False)
+    trial_data.to_csv(f"fMRI/selected_trial_lists_scanning_sub-{subject}_ses-{session}/sub-{subject}/sub-{subject}_ses-{session}_run-{run+1}_trials.csv", index=False)
+
+    path = Path(file)
+    parent = path.parent
+
+    shutil.copytree(parent, f"fMRI/selected_trial_lists_scanning_sub-{subject}_ses-{session}/sub-{subject}/selected_ses-{session}_run-{run+1}_tau_{tau[run]}")
