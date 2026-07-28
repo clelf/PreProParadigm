@@ -174,9 +174,26 @@ for run, file in enumerate(win):
     nulls = np.loadtxt("null_events.txt")
 
     # shuffle ITIs randomly
-    random.shuffle(iti)
+    np.random.shuffle(iti)
     iti = iti.tolist()
 
+    n = len(iti)
+    num_nulls = len(nulls)
+    min_gap = 3
+
+    available = n - 2
+
+    free = available - (num_nulls - 1) * (min_gap - 1)
+
+    base = sorted(random.sample(range(free), num_nulls))
+
+    positions = [
+        b + i * (min_gap - 1) + 1
+        for i, b in enumerate(base)
+    ]
+
+
+    '''
     positions = []
     last = -3 # trials distance between nulls
 
@@ -192,8 +209,10 @@ for run, file in enumerate(win):
 
         positions.append(pos)
         last = pos
+    '''    
 
     positions.sort()
+    print(positions)
 
     for pos, value in zip(reversed(positions), nulls):
         iti.insert(pos, value)
