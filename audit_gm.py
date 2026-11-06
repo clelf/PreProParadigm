@@ -506,6 +506,17 @@ class AuditGenerativeModel:
                 # LGD update at individual tone level: x[t] = x[t-1] + 1/tau * (lim - x[t-1]) + noise
                 states[0][b, t] = states[0][b, t - 1] + 1 / tau[0] * (lim[0] - states[0][b, t - 1]) + w_std[t - 1]
 
+            # TODO: possibly ignore and instead run:
+            # # Sample noise for std process
+            # w_std = self._sample_N_(0, si_q[0], contexts.shape[1])
+            # for t in range(0, contexts.shape[1]):
+            #     if b == 0 and t == 0:
+            #        continue  # first tone of the session keeps its initialization
+            #   # Previous tone of the std process, which for the first tone of a block is the last tone of the previous block
+            #     x_previous = states[0][b, t - 1] if t > 0 else states[0][b - 1, -1]
+            #     # LGD update at individual tone level: x[t] = x[t-1] + 1/tau * (lim - x[t-1]) + noise
+            #     states[0][b, t] = x_previous + 1 / tau[0] * (lim[0] - x_previous) + w_std[t]
+            
         # --- DVT process: update only at deviant position in each block ---
         if self.N_ctx > 1:
             # Sample the first value around the process' stationary value
@@ -535,6 +546,163 @@ class AuditGenerativeModel:
             return states, pars
         else:
             return states
+
+    def sample_states_corr(self, contexts, return_pars=False):
+        """Generates a dictionary of data sequence for each context (std or dvt) dynamics given a sequence of contexts
+
+        Here contexts is the sequence of tone-by-tone boolean value standing for {std: 0, dvt: 1} that has been
+        hierarchically defined prior to the call of sample_states
+
+        Parameter sampling strategy:
+        - tau and si_stat are sampled once per run.
+        - lim is sampled per block.
+
+        Processes dynamics:
+        - states[1] (dvt) is updated at every block, and follows the same across the entire block
+        - states[0] (std) is updated at every timestep.
+
+
+        Parameters
+        ----------
+        contexts : ndarray
+            2-D integer array of shape (N_blocks, N_tones) with values {0, 1} indicating
+            standard (0) or deviant (1) at each tone.
+        return_pars : bool, optional
+            If True, also return a tuple with sampled parameters ``(tau, lim, si_stat, si_q)``.
+
+        Returns
+        -------
+        states : dict
+            Mapping from context id to a 2-D array of shape (N_blocks, N_tones) with the
+            hidden-state trajectory for that context.
+        pars : tuple, optional
+            When ``return_pars`` is True, returns ``(tau, lim, si_stat, si_q)`` where
+            ``si_q`` is the process noise computed from ``tau`` and ``si_stat``.
+        """
+
+        # Sample tau and si_stat for all of the run's blocks
+
+        if not self.fix_process:
+            if self.params_testing:
+                if self.tau_std_dev_dependency and self.N_ctx == 2:
+                    # Sampled base = deviant timescale; standard timescale is N_tones
+                    # slower (tau_dev = tau_std / N_tones). tau[0]=std, tau[1]=dev.
+                    tau_dev = self.mu_tau
+                    tau = np.array([tau_dev * self.N_tones, tau_dev])
+                else:
+                    tau = self.mu_tau * np.ones(self.N_ctx) # for compatibility with later, since when self.params_testing, N_ctx can only be 1
+                si_stat = self.si_stat
+            else:
+                # NOTE: for mu_tau=64, si_tau=0.5 the distributions covers well the range of values from 1 to 256
+                if self.tau_std_dev_dependency and self.N_ctx == 2:
+                    # Sample the deviant timescale once (base) and derive the standard
+                    # timescale as N_tones * tau_dev (tau_dev = tau_std / N_tones, >= 1).
+                    tau_dev = self._sample_logN_(min=1, mu=self.mu_tau, si=self.si_tau, size=1).item()
+                    tau = np.array([tau_dev * self.N_tones, tau_dev]) # [tau_std, tau_dev]
+                else:
+                    tau = self._sample_logN_(min=1, mu=self.mu_tau, si=self.si_tau, size=self.N_ctx) # size = (N_ctx,)
+                si_stat = self._sample_logN_(min=0, mu=self.si_stat, si=0.2).item() # std and dvt share the same stationary variance
+
+        elif self.fix_process:
+            tau = np.array(self.fix_tau_val)
+            si_stat = self.si_stat
+
+        # Compute si_q (for both processes)
+        si_q = si_stat * ((2 * tau - 1) ** 0.5) / tau
+        
+        # lim_Cs = self.sample_uniform_set(self.tones_values, N=self.N_ctx)
+        # for c in range(self.N_ctx):
+        #     lim[c] = self._sample_N_(lim_Cs[c], self.si_lim)
+        
+        # Sample lim once for the entire run
+        lim = np.zeros((self.N_ctx,))        
+        
+        if self.N_ctx == 1:
+            lim[0] = self._sample_N_(0, 1).item()
+
+        # Sample d
+        if self.N_ctx == 2:
+            # effective standard deviation considering both process and observation noise
+            si_eff = np.sqrt(si_stat**2 + self.si_r**2)
+            if not self.fix_process:
+                d = self._sample_biN_(self.mu_d, self.si_d).item()
+                lim[0] = self._sample_N_(0.5, 0.5).item()
+                # lim[0] = -0.6
+                # d = 2
+                if np.sign(lim[0]) == np.sign(d): lim[0] *= -1 # this ensures the sampled lim[0] and d have opposite signs so lim[1] is on the other side of lim[0]
+                lim[1] = lim[0] + d * si_eff 
+
+            else:
+                d = self.fix_d_val
+                lim[0] = self.fix_lim_val
+                #if np.sign(lim[0]) == np.sign(d): lim[0] *= -1
+                lim[1] = lim[0] + d * si_eff  
+        
+        # Initialize states
+        states = dict([(int(c), np.zeros(contexts.shape)) for c in range(self.N_ctx)])
+
+        # --- STD process: update at every timestep ---
+        # Randomly initialize state for std process at first tone of first block only
+        if self.init == 'N':
+            states[0][0, 0] = self._sample_N_(lim[0], si_stat).item()
+        elif self.init == 'MU':    
+            states[0][0,0] = lim[0]
+        elif self.init == 'TN':    
+            states[0][0, 0] = self._sample_TN_(lim[0]-si_stat, lim[0]+si_stat, lim[0], si_stat).item()
+        elif self.init == 'TN_3':
+            states[0][0, 0] = self._sample_TN_(lim[0]-(si_stat/3), lim[0]+(si_stat/3), lim[0], si_stat).item()  
+
+        for b in range(self.N_blocks):
+            # # Initial state for std process as the last value of the previous block
+            # states[0][b, 0] = states[0][b - 1, -1] if b > 0 else states[0][0, 0]
+
+            # # Sample noise for std process
+            # w_std = self._sample_N_(0, si_q[0], contexts.shape[1])
+            # for t in range(1, contexts.shape[1]):
+            #     # LGD update at individual tone level: x[t] = x[t-1] + 1/tau * (lim - x[t-1]) + noise
+            #     states[0][b, t] = states[0][b, t - 1] + 1 / tau[0] * (lim[0] - states[0][b, t - 1]) + w_std[t - 1]
+
+            # TODO: possibly ignore and instead run:
+            # Sample noise for std process
+            w_std = self._sample_N_(0, si_q[0], contexts.shape[1])
+            for t in range(0, contexts.shape[1]):
+                if b == 0 and t == 0:
+                   continue  # first tone of the session keeps its initialization
+                # Previous tone of the std process, which for the first tone of a block is the last tone of the previous block
+                x_previous = states[0][b, t - 1] if t > 0 else states[0][b - 1, -1]
+                # LGD update at individual tone level: x[t] = x[t-1] + 1/tau * (lim - x[t-1]) + noise
+                states[0][b, t] = x_previous + 1 / tau[0] * (lim[0] - x_previous) + w_std[t]
+            
+        # --- DVT process: update only at deviant position in each block ---
+        if self.N_ctx > 1:
+            # Sample the first value around the process' stationary value
+            if self.init == 'N':
+                states[1][0, :] = self._sample_N_(lim[1], si_stat, size=1)
+            elif self.init == 'MU':    
+                states[1][0,:] = lim[1]
+            elif self.init == 'TN':    
+                states[1][0,:] = self._sample_TN_(lim[1]-si_stat, lim[1]+si_stat, lim[1], si_stat).item()
+            elif self.init == 'TN_3':
+                states[1][0,:] = self._sample_TN_(lim[1]-(si_stat/3), lim[1]+(si_stat/3), lim[1], si_stat).item()
+
+            for b in range(1,self.N_blocks):
+                # LGD update at block level: x[b] = x[b-1] + 1/tau * (lim - x[b-1]) + noise
+                w_dvt = self._sample_N_(0, si_q[1], size=1)
+                states[1][b, :] = states[1][b - 1, :] + 1 / tau[1] * (lim[1] - states[1][b - 1, :]) + w_dvt
+                
+
+        if return_pars:
+            # Return parameters as a labeled dictionary for clarity and compatibility
+            pars = {
+                'tau': tau.squeeze(),       # time constant (scalar if N_ctx=1, array if N_ctx>1)
+                'lim': lim.squeeze(),       # stationary value (scalar if N_ctx=1, array if N_ctx>1)
+                'si_stat': si_stat,         # stationary std (scalar)
+                'si_q': si_q.squeeze()      # process noise std (scalar if N_ctx=1, array if N_ctx>1)
+            }
+            return states, pars
+        else:
+            return states
+
 
     def sample_observations(self, contexts, states):
         """Generates a single data sequence y_t given a sequence of contexts c_t and a sequence of

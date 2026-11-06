@@ -1,49 +1,50 @@
-"""Generate Kalman-filter predictions into `BehavModeling/kalman_pred/`.
+"""Compute Kalman filter (KF) predictions for all subjects and sessions, saved in `BehavModeling/kalman_pred/`.
 
-Driver for `PreProParadigm.model_RTs.compute_likelihoods_at_deviants`, run across
-subjects x sessions x observation-noise settings and parallelized over those tasks.
+Runs `PreProParadigm.model_RTs.compute_likelihoods_at_deviants` for each (subject, session,
+observation noise setting), in parallel over these combinations.
 
-Two kinds of output, distinguished by filename suffix:
+Observation noise settings (`sigma_r`, a standard deviation, squared into the covariance R):
+  None    R estimated by EM          ->  kalman_predictions_sub-{sub}_ses-{sess}.csv
+  'true'  R fixed at the session's   ->  kalman_predictions_sub-{sub}_ses-{sess}_sigma_r_{si_r}.csv
+          own true si_r (read from its triallist)
+  float   R fixed at this value      ->  same file name, with the given value as {si_r}
+With --sigma-r, the fixed values replace 'true' and the EM variant is added (unless --no-em-fitted).
 
-  EM-fitted R   sigma_r=None  ->  kalman_predictions_sub-{sub}_ses-{sess}.csv
-      The KF estimates the observation noise itself. Note this only does anything now that
-      `observation_covariance` is back in the EM variable list: previously R was neither
-      supplied nor estimated and silently sat at pykalman's default of 1.0, against a true
-      R of ~1e-4. Even now, EM lands at ~0.06 (~570x the true 1e-4) and this variant stays
-      worse than the fixed-sigma_r ones -- but NOT because the model is misspecified. The
-      2-state / H=[1,1] model CAN represent the OU exactly (one state carries the level with
-      a unit-root eigenvalue, the other the mean-reverting AR(1) part; H sums them). Scored
-      on real data, the true parameters give a far higher loglik than the EM fit. The real
-      cause is optimization: EM runs only n_iter=5 (see model_RTs.kalman_online_fit_predict_
-      multicontext) starting from pykalman's default R=1.0, which is ~1e4x too big. From that
-      init the Kalman gain starts near 0, the filter barely tracks, smoothing residuals stay
-      large, and the M-step keeps R large; 5 iterations do not undo it. Given ~20+ iterations
-      R falls to within a few-x of the truth. Cheaper still: initializing R near the data
-      scale (e.g. 0.5*var(diff of the std series)) reaches within ~6x of the truth at the
-      SAME n_iter=5. So this variant is fixable (more iterations or a better R init), not
-      fundamentally limited. It is left as-is here because we compare against the fixed-
-      sigma_r variant, which sidesteps the R estimation entirely.
+Outputs, per (subject, session, setting):
+  - kalman_predictions_*.csv: predictions, plus the KF parameters at each timestep:
+    A_{ctx}_{ij}, Q_{ctx}_{ij}, H_{ctx}_{j} and R_{ctx}, for ctx in {std, dev}
+    (each context has its own filter). R_{ctx} is a variance: compare it to the true si_r squared.
+  - kalman_predictions_and_likelihoods_at_deviants_*.csv: likelihoods at deviants.
+All saved `sigma_*` columns are standard deviations.
 
-  Fixed R       sigma_r=X     ->  kalman_predictions_sub-{sub}_ses-{sess}_sigma_r_{X}.csv
-      sigma_r is a STANDARD DEVIATION on the scale of the triallists' `sigma_r` column; it is
-      squared into R by compute_likelihoods_at_deviants. By default X is each session's OWN true
-      si_r, read from its triallist (0.005 or 0.01 here), so R is pinned at the truth rather than
-      swept -- pass --sigma-r to fix it at other values instead.
+Existing outputs are recomputed by default, so that a rerun always reflects the current code
+(unlike `PreProParadigm/compute_predictions_and_likelihoods.py`, which skips existing files and
+can keep outputs that are no longer valid). Use --skip-existing to resume an interrupted run.
 
-Every saved `sigma_*` column is a standard deviation.
+Cost: the filter is O(T**2) (EM is refitted from scratch at every timestep). About 65 s per run of
+T=480, so ~4.3 min per (sub, sess, sigma_r) task of 4 runs. 3 subs x 4 sessions x 2 settings
+(24 tasks) take ~7-9 min on 16 cores.
 
-Both CSVs also carry the per-timestep fitted KF parameters as extra columns: A_{ctx}_{ij},
-Q_{ctx}_{ij}, H_{ctx}_{j} and R_{ctx} for ctx in {std, dev} (each context has its own filter).
-R_{ctx} is the fitted observation-noise VARIANCE -- compare it against the true si_r SQUARED:
-pinned at it in the fixed-R variant, or EM-estimated and free to drift in the EM-fitted one.
-
-Unlike `PreProParadigm/compute_predictions_and_likelihoods.py`, this recomputes by default --
-that script's skip-on-exists silently preserves stale files across code changes. Pass
---skip-existing if you actually want to resume an interrupted run.
-
-Cost: the filter is O(T**2) (EM refits from scratch at every timestep), ~65s per run of T=480,
-so ~4.3 min per (sub, sess, sigma_r) task of 4 runs. The default 3x4x2 grid (EM-fitted + true
-si_r per session, 24 tasks) is ~7-9 min on 16 cores.
+Notes:
+  - EM-fitted R is worse than fixed R, but not because the model is misspecified: the 2-state,
+    H=[1,1] model can represent the process exactly (one state carries the level with a unit-root
+    eigenvalue, the other the mean-reverting AR(1) part), and the true parameters give a much
+    higher log-likelihood on real data than the EM fit. The cause is optimization: EM runs only
+    n_iter=5 (see model_RTs.kalman_online_fit_predict_multicontext), starting from pykalman's
+    default R=1.0, ~1e4 times the true R (~1e-4). The Kalman gain then starts near 0, the filter
+    barely tracks, residuals stay large and the M-step keeps R large. EM lands at R ~0.06 (~570x
+    the truth). With ~20+ iterations, R gets within a few-fold of the truth; initializing R near the
+    data scale (e.g. 0.5 * var of the differenced std series) reaches ~6x at the same n_iter=5.
+    The EM variant is left as is, since it is compared against the fixed-R variant.
+  - Before `observation_covariance` was added to the EM variables, R was neither supplied nor
+    estimated, and stayed at pykalman's default of 1.0.
+  - The output also has `tau_hat_{ctx}`, the time constant implied by each context's A (from its
+    non-unit eigenvalue, see model_RTs._tau_from_A), to compare with the triallists' tau_std /
+    tau_dev. It is weakly identified: across the 48 runs of this cohort, Spearman rho ~0.27 with
+    the true value, and the dev values stay near 1.7 for true tau_dev between 2 and 30.
+    There is no `lim_hat`: `lim` lives in the state, not in A/Q/H/R.
+  - DEFAULT_SIGMA_R_LEVELS currently contains only 'true' (no EM variant by default), which
+    differs from the earlier default of EM + true.
 """
 
 import argparse
@@ -76,11 +77,11 @@ SUBS = ['04', '05', '06']
 SESSIONS = [1, 2, 3, 4]
 
 # The noise settings run per (sub, session) by default. Two entries, on purpose -- we compare
-# the EM-estimated R against R pinned at the truth, not a sweep of si_r values:
+# the EM-estimated R against R pinned at the truth, not a testing over of si_r values:
 #   None    -> EM estimates R itself (free to drift from the truth)
 #   'true'  -> R fixed at THIS session's own true si_r, resolved per task from its triallist
 # (see _run_task). Pass --sigma-r to fix R at explicit values instead.
-DEFAULT_SIGMA_R_LEVELS = [None, 'true']
+DEFAULT_SIGMA_R_LEVELS = ['true']
 
 
 def _triallist_path(sub, sess):

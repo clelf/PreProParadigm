@@ -62,11 +62,11 @@ N_POSITIONS = 8  # within-trial timesteps 0..7, as keyed by prior_dpos_given_pre
 # Every panel plots the same quantity against the same positions, so the axis labels belong to the
 # figure rather than to any one panel (fig.supxlabel/supylabel).
 XLABEL = "Position within trial"
-YLABEL = r"$P(t \in \mathrm{dev} \mid \{k \, : \, k \in \mathrm{std}, \, k<t\})$"
+YLABEL = r"$P(c_t = \mathrm{dev} \mid \{c_k \, : \, c_k = \mathrm{std}, \, k<t\})$"
 
 # Categorical slots 1 and 2 of the validated reference palette, used in fixed order (never cycled):
 # slot 1 carries the single-series panels, slots 1-2 the two cues.
-SERIES = ['tab:blue', 'tab:orange']
+SERIES = ['tab:red', 'tab:blue', 'tab:orange']
 INK, MUTED = '#1a1a19', '#6b6b68'
 
 # Fraction of the unit spacing between positions taken up by a bar (or by a whole cue group).
@@ -82,7 +82,7 @@ LABEL_FS, LABEL_FS_GROUPED = 7, 5.5
 # EXTRA_W_PER_CUE per cue beyond the first. The tightest pair -- the two equal-height '0.50' bars at
 # position 5 -- only clears the eye at ~0.7: the label gap grows slowly with width (labels are fixed
 # point size), so it merely stops overlapping at 0.45 and does not open a visible gap until here.
-FIG_W = 3.8
+FIG_W = 2
 EXTRA_W_PER_CUE = 0.7
 
 # Points between a panel and its title (matplotlib's default is 6). Tightened because the panels
@@ -133,12 +133,12 @@ def _bars(ax, x, y, color, width, label=None, fontsize=LABEL_FS, frac_labels=Fal
     able to reach d), it is marked 'n/a' in grey rather than drawn as a zero.
     """
     ax.bar(x, y, width=width, color=color, label=label, zorder=3)
-    for xi, yi in zip(x, y):
-        defined = np.isfinite(yi)
-        ax.text(xi, (yi if defined else 0.0) + 0.03,
-                (_frac_label(yi) if frac_labels else _dec_label(yi)) if defined else "n/a",
-                ha='center', va='bottom',
-                fontsize=fontsize, color=INK if defined else MUTED, zorder=4)
+    # for xi, yi in zip(x, y):
+    #     defined = np.isfinite(yi)
+    #     ax.text(xi, (yi if defined else 0.0) + 0.03,
+    #             (_frac_label(yi) if frac_labels else _dec_label(yi)) if defined else "n/a",
+    #             ha='center', va='bottom', rotation=45, # add a parameter to make it 45 degrees tilted: 
+    #             fontsize=fontsize, color=INK if defined else MUTED, zorder=4)
 
 
 def _style(ax, positions, headroom=1.18):
@@ -197,7 +197,7 @@ def plot_deviant_priors(pi_rule, cue_rule_lik=None, valid_positions=None, prev_r
     # Constrained (not tight) layout: only it reserves room for the figure-level axis labels,
     # which tight_layout sizes around the axes alone and would let the panels overlap.
     figwidth = FIG_W + EXTRA_W_PER_CUE * (len(cues) - 1)
-    fig, axs = plt.subplots(nrows, 1, figsize=(figwidth, 0.9 * nrows + 0.4), sharex=True,
+    fig, axs = plt.subplots(nrows, 1, figsize=(figwidth, 0.6 * nrows + 0.6), sharex=True,
                             layout='constrained')
     # Rows still need a little air between them, but less now that each title sits close to its
     # own panel: the gap reads as separating panels rather than orphaning the title above.
@@ -210,7 +210,7 @@ def plot_deviant_priors(pi_rule, cue_rule_lik=None, valid_positions=None, prev_r
     _bars(axs[0], positions,
           [prior_dpos_given_prev_stds(d, p_no_dev=p_no_dev) for d in positions],
           SERIES[0], width=GROUP_WIDTH, frac_labels=frac_labels)
-    axs[0].set_title("Global prior (marginalized over rules)",
+    axs[0].set_title("Global prior",
                     #  + (f"   P(no-deviant trial)={p_no_dev:.3f}" if p_no_dev else ""),
                      fontsize=9, color=INK, pad=TITLE_PAD)
     _style(axs[0], positions)
@@ -218,7 +218,7 @@ def plot_deviant_priors(pi_rule, cue_rule_lik=None, valid_positions=None, prev_r
     # Rows 1..N: the rule-aware prior, one panel per PREVIOUS rule; cues become grouped bars.
     width = GROUP_WIDTH / len(cues)
     for ax, r_prev in zip(axs[1:], prev_rules):
-        for k, (cue, color) in enumerate(zip(cues, SERIES)):
+        for k, (cue, color) in enumerate(zip(cues, SERIES[1:])):
             if cue is None:
                 y = [pior_dpos_given_prev_rule_and_stds(d, pi_rule, r_prev, valid_positions)
                      for d in positions]
@@ -233,9 +233,9 @@ def plot_deviant_priors(pi_rule, cue_rule_lik=None, valid_positions=None, prev_r
                   fontsize=LABEL_FS_GROUPED if len(cues) > 1 else LABEL_FS,
                   frac_labels=frac_labels)
 
-        kind = "Cue-rule-modulated prior" if cue_rule_lik else "Rule-modulated prior"
+        kind = "Cue-rule prior" if cue_rule_lik else "Rule prior"
         row = np.array2string(pi_rule[r_prev], precision=2, separator=', ')
-        ax.set_title(rf"{kind}  |  previous rule = {r_prev}", #    ($\pi$ row {row})
+        ax.set_title(rf"{kind}  |  rule$_{{t-1}}$={r_prev}", #    ($\pi$ row {row})
                      fontsize=9, color=INK, pad=TITLE_PAD)
         _style(ax, positions)
         if len(cues) > 1:
