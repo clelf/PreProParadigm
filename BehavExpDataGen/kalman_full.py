@@ -18,6 +18,7 @@ else:
 # Index of each process (context) along the N_ctx axes
 STD_CONTEXT = 0
 DEV_CONTEXT = 1
+CONTEXT_INDEX_BY_NAME = {'std': STD_CONTEXT, 'dev': DEV_CONTEXT} # suffix of the saved columns -> index along the N_ctx axes
 
 
 def combine_kf_predictions_until_j(inf_states, trial_k, j):
@@ -163,6 +164,14 @@ class HAudIn():
         hat_y_var_ctx_trials = hat_y_var_ctx.reshape(self.N_trials, self.N_tones, -1).transpose(1, 0, 2) # shape: N_tones, N_trials, N_ctx
         hat_y_mean_ctx_trials_m = np.zeros((self.N_tones, self.N_trials, self.N_ctx, self.N_dpos)) # shape: N_tones, N_trials,  self.N_ctx, N_dpos; mean of the prediction of y_t by each process (= mean of the predicted state, (6b)), under each hypothesis m (self.dpos_set) // Probability distribution mean
         hat_y_var_ctx_trials_m = np.zeros((self.N_tones, self.N_trials, self.N_ctx, self.N_dpos))  # shape: N_tones, N_trials, N_ctx, N_dpos; VARIANCE of the same prediction of y_t (= variance of the predicted state (6b) + observation noise) // Probability distribution variance
+        # Estimates of tau, b and the process noise VARIANCE of each process under each hypothesis m, after the update with y_t
+        # (the values from which the prediction of the next tone is made); shape: N_tones, N_trials, N_ctx, N_dpos
+        hat_tau_ctx_trials_m = np.zeros((self.N_tones, self.N_trials, self.N_ctx, self.N_dpos))
+        hat_b_ctx_trials_m = np.zeros((self.N_tones, self.N_trials, self.N_ctx, self.N_dpos))
+        hat_process_noise_ctx_trials_m = np.zeros((self.N_tones, self.N_trials, self.N_ctx, self.N_dpos))
+        # Number of transitions (moves) of each process in the running sums of the estimates, under each hypothesis m, after
+        # the update with y_t (compared with n_transitions_before_using_estimates); shape: N_tones, N_trials, N_ctx, N_dpos
+        n_transitions_ctx_trials_m = np.zeros((self.N_tones, self.N_trials, self.N_ctx, self.N_dpos), dtype=int)
         lik_y_trials_m = np.zeros((self.N_tones, self.N_trials, self.N_dpos)) # shape: N_tones, N_trials, N_dpos; l_t(m) (7), one per hypothesis m (self.dpos_set)
         # self.hat_y_trials = np.zeros((self.N_tones, self.N_trials)) # shape: N_tones, N_trials; prediction marginalized over hypotheses m
 
@@ -199,6 +208,10 @@ class HAudIn():
             'hat_y_var_ctx_trials': hat_y_var_ctx_trials,
             'hat_y_mean_ctx_trials_m': hat_y_mean_ctx_trials_m,
             'hat_y_var_ctx_trials_m': hat_y_var_ctx_trials_m,
+            'hat_tau_ctx_trials_m': hat_tau_ctx_trials_m,
+            'hat_b_ctx_trials_m': hat_b_ctx_trials_m,
+            'hat_process_noise_ctx_trials_m': hat_process_noise_ctx_trials_m,
+            'n_transitions_ctx_trials_m': n_transitions_ctx_trials_m,
             'lik_y_trials_m': lik_y_trials_m,
             # 'P_C': P_C,
             'p_c_m': p_c_m,
@@ -244,7 +257,10 @@ class HAudIn():
         1); std moves at every tone, dev moves once per trial, at j == m, from trial 1 (table of Step 4).
 
         Fills, for trial k and each m: inf_states['hat_y_mean_ctx_trials_m'], inf_states['hat_y_var_ctx_trials_m'] (prediction of
-        y_t by each process, (6): mean of the predicted state, and its VARIANCE plus the observation noise), and
+        y_t by each process, (6): mean of the predicted state, and its VARIANCE plus the observation noise),
+        inf_states['hat_tau_ctx_trials_m'], inf_states['hat_b_ctx_trials_m'], inf_states['hat_process_noise_ctx_trials_m']
+        (estimates of each process after the update with y_t), inf_states['n_transitions_ctx_trials_m'] (number of
+        transitions of each process in the running sums, after the update with y_t), and
         inf_states['kf_states_m'] (filtered state and running sums after the last tone, one dict per m, in the order
         of self.dpos_set).
         """
@@ -292,6 +308,10 @@ class HAudIn():
                 )
                 inf_states['hat_y_mean_ctx_trials_m'][j, k, :, i_m] = pred_means
                 inf_states['hat_y_var_ctx_trials_m'][j, k, :, i_m] = pred_vars
+                inf_states['hat_tau_ctx_trials_m'][j, k, :, i_m] = kf_state['tau']
+                inf_states['hat_b_ctx_trials_m'][j, k, :, i_m] = kf_state['b']
+                inf_states['hat_process_noise_ctx_trials_m'][j, k, :, i_m] = kf_state['process_noise']
+                inf_states['n_transitions_ctx_trials_m'][j, k, :, i_m] = kf_state['n_transitions']
 
             kf_states_m.append(kf_state)
 
@@ -522,7 +542,17 @@ class HAudIn():
     
     def save_inference(self, inf_states, saving_path):
         """Save the per-tone inference outputs of one sequence as a CSV at saving_path (full file path), one row per
-        tone t = N_tones * k + j, with the HAudIn start values and settings as extra (constant) columns."""
+        tone t = N_tones * k + j, with the HAudIn start values and settings as extra (constant) columns.
+
+        Besides the predictions marginalized over the deviant positions m, the file holds:
+        - {tau, b, process_noise}_end_of_trial_{std, dev}: estimates of the merged predictor after the last tone of
+          trial k (23)-(24), repeated on the N_tones rows of trial k; process_noise is a VARIANCE
+        - {hat_y_mean, hat_y_var}_{std, dev}_dpos_{m}: mean and VARIANCE of the prediction of y_t by each process under
+          the hypothesis that the deviant of trial k is at position m (6)
+        - {hat_tau, hat_b, hat_process_noise}_{std, dev}_dpos_{m}: estimates of each process under the hypothesis m,
+          after the update with y_t (the values from which y_{t+1} is predicted; the values that predicted y_t are the
+          ones of the previous row, or the end_of_trial ones of trial k-1 at the first tone of trial k)
+        """
         inf_df = pd.DataFrame({
             'trial_no': np.repeat(np.arange(self.N_trials), self.N_tones),
             'relative_pos': np.tile(np.arange(self.N_tones), self.N_trials),
@@ -543,6 +573,34 @@ class HAudIn():
             inf_df[f'p_dpos_{m}'] = p_dk[:, i_m]
         for r in range(self.N_rules):
             inf_df[f'p_rule_{r}'] = inf_states['hat_rk'][:, r]
+
+        # Estimates of the merged predictor after the last tone of each trial, repeated on the rows of the trial
+        end_of_trial_estimates = {
+            'tau': np.array([kf_state['tau'] for kf_state in inf_states['kf_states_end_trials']]), # shape: (N_trials, N_ctx)
+            'b': np.array([kf_state['b'] for kf_state in inf_states['kf_states_end_trials']]),
+            'process_noise': np.array([kf_state['process_noise'] for kf_state in inf_states['kf_states_end_trials']]),
+        }
+        for name, values in end_of_trial_estimates.items():
+            values_per_tone = np.repeat(values, self.N_tones, axis=0) # shape: (N_trials * N_tones, N_ctx)
+            for context_name, i_ctx in CONTEXT_INDEX_BY_NAME.items():
+                inf_df[f'{name}_end_of_trial_{context_name}'] = values_per_tone[:, i_ctx]
+
+        # Moments of the predictions and estimates of each process under each hypothesis m, one column per (process, m);
+        # arrays (N_tones, N_trials, N_ctx, N_dpos) -> (N_trials * N_tones, N_ctx, N_dpos), flat tone order t = N_tones * k + j
+        per_hypothesis_quantities = {
+            'hat_y_mean': inf_states['hat_y_mean_ctx_trials_m'],
+            'hat_y_var': inf_states['hat_y_var_ctx_trials_m'],
+            'hat_tau': inf_states['hat_tau_ctx_trials_m'],
+            'hat_b': inf_states['hat_b_ctx_trials_m'],
+            'hat_process_noise': inf_states['hat_process_noise_ctx_trials_m'],
+        }
+        per_hypothesis_columns = {}
+        for name, values in per_hypothesis_quantities.items():
+            values_per_tone = values.transpose(1, 0, 2, 3).reshape(-1, self.N_ctx, self.N_dpos)
+            for context_name, i_ctx in CONTEXT_INDEX_BY_NAME.items():
+                for i_m, m in enumerate(self.dpos_set):
+                    per_hypothesis_columns[f'{name}_{context_name}_dpos_{m}'] = values_per_tone[:, i_ctx, i_m]
+        inf_df = pd.concat([inf_df, pd.DataFrame(per_hypothesis_columns)], axis=1) # one concatenation: avoids a fragmented df
 
         # Start values and settings (one value per process -> one column per process)
         inf_df['estimate_process_noise'] = self.estimate_process_noise

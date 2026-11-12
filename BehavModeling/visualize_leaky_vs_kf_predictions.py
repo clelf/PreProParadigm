@@ -33,7 +33,7 @@ misleading in the KF's disfavour, which is what motivated the rewrite:
      converge, NOT because the KF cannot represent the process -- see compute_kf_predictions.py.
      'both' overlays the two KF bands on one figure (true-sigma_r vs EM-fitted, distinct colours)
      for a side-by-side read.
-  2. The KF's `sigma_*` columns used to hold VARIANCES while the leaky's held STANDARD
+  2. The KF's `sigma_*` columns used to hold variances while the leaky's held STANDARD
      DEVIATIONS, and plot_sample draws mu +/- sigma for both. The two bands were in different
      units. Both are standard deviations now.
 
@@ -60,13 +60,19 @@ import matplotlib
 matplotlib.use('Agg')
 import matplotlib as mpl
 import matplotlib.pyplot as plt
+import matplotlib.colors as mcolors
 from matplotlib.legend_handler import HandlerTuple
+from matplotlib.patches import Patch
 
 # Reuse the workspace's data prep.
 sys.path.insert(0, '/home/clevyfidel/Documents/Workspace')
 sys.path.insert(0, '/home/clevyfidel/Documents/Workspace/PreProParadigm')
 
 from model_RTs import prepare_trials_data
+
+# Index of each process (context) along the N_ctx axes of HAudIn's inference outputs
+sys.path.insert(0, '/home/clevyfidel/Documents/Workspace/PreProParadigm/BehavExpDataGen')
+from kalman_full import STD_CONTEXT, DEV_CONTEXT
 
 # Where the leaky-integrator inputs (triallists) and both models' predictions live.
 PREPRO_DIR = '/home/clevyfidel/Documents/Workspace/PreProParadigm'
@@ -126,7 +132,271 @@ SHOW_LIK = 'show_lik'
 SHOW_PARAMS = True
 
 
-def plot_obs_and_models(obs, contexts, models, save_path, title=None, show_lik=None):
+# Colours and heights of the optional panels showing the hierarchical inference of HAudIn (kalman_full.py):
+#   CONTEXT_COLORS               = std / dev (lines, error bars, background of the true context)
+#   DPOS_COLORS                  = one per possible deviant position, in the order of HAudIn's dpos_set
+#   RULE_COLORS                  = rule 0 / rule 1
+#   PREDICTED_DISTRIBUTION_COLOR = density of the predicted distribution of y_t
+#   PREDICTED_MEAN_COLOR         = mean of the predicted distribution of y_t
+CONTEXT_COLORS = {STD_CONTEXT: 'tab:blue', DEV_CONTEXT: 'tab:red'}
+DPOS_COLORS = ['tab:green', 'tab:pink', 'tab:gray', 'tab:olive', 'tab:cyan']
+RULE_COLORS = {0: 'tab:purple', 1: 'tab:orange'}
+PREDICTED_DISTRIBUTION_COLOR = 'tab:purple'
+PREDICTED_MEAN_COLOR = 'tab:cyan'
+
+# Height of each panel of plot_obs_and_models, in inches (multiplied by its panel_height_scale argument), and gaps
+# between panels, in inches: below the observation panel (which carries the x tick labels), and between the others
+PANEL_HEIGHTS = {
+    'observations': 2.3,
+    'likelihood': 0.77,
+    'context_probabilities': 0.8,
+    'dpos_probabilities': 0.8,
+    'rule_probabilities': 0.8,
+    'context_predictions': 1.5,
+    'predicted_distribution': 1.5,
+    'tau': 0.8,
+    'b': 0.8,
+    'process_noise': 0.8,
+}
+GAP_BELOW_FIRST_PANEL = 0.6
+GAP_BETWEEN_PANELS = 0.2
+
+
+def plot_true_category_background(ax, true_categories, category_colors):
+    """Colour the background of ax, at each timestep, with the colour of the true category of that timestep, as
+    audit_gm's plot_combined_with_matrix colours each trial with its rule. Consecutive timesteps of the same category
+    share one span; a category without a colour in category_colors (e.g. dpos 0, an omission) leaves a white background.
+
+    Args:
+        ax: axes to colour
+        true_categories: true category of each timestep, shape (T,)
+        category_colors: dict {category value: colour}
+    """
+    true_categories = np.asarray(true_categories)
+    category_changes = np.flatnonzero(np.diff(true_categories)) + 1
+    span_starts = np.concatenate([[0], category_changes])
+    span_ends = np.concatenate([category_changes, [len(true_categories)]])
+    for span_start, span_end in zip(span_starts, span_ends):
+        category = true_categories[span_start]
+        if category in category_colors:
+            ax.axvspan(span_start - 0.5, span_end - 0.5, facecolor=category_colors[category], alpha=0.25, linewidth=0)
+
+
+def plot_category_probabilities(ax, probabilities, category_values, category_labels, category_colors,
+                                true_categories, ylabel):
+    """Plot the estimated probability of each category of one categorical variable (context, deviant position or rule)
+    at each timestep, one line per category, over a background coloured with the true category of each timestep.
+
+    Args:
+        ax: axes to plot on
+        probabilities: estimated probability of each category, shape (T, number of categories), columns in the order
+            of category_values
+        category_values: value of each category (e.g. STD_CONTEXT / DEV_CONTEXT, the deviant positions, the rules)
+        category_labels: legend entry of each category, in the order of category_values
+        category_colors: dict {category value: colour}, used for the lines and the background
+        true_categories: true category of each timestep, shape (T,)
+        ylabel: label of the y axis
+    """
+    plot_true_category_background(ax, true_categories, category_colors)
+    x = np.arange(probabilities.shape[0])
+    for i_category, category in enumerate(category_values):
+        ax.plot(x, probabilities[:, i_category], color=category_colors[category], linewidth=1,
+                label=category_labels[i_category])
+    ax.set_ylim(0, 1)
+    ax.set_yticks([0, 1])
+    ax.set_ylabel(ylabel, fontsize=8)
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+    ax.legend(loc='center left', bbox_to_anchor=(1.0, 0.5), frameon=False, fontsize=7)
+
+
+def plot_context_predictions(ax, context_means, context_variances, context_probabilities, y_limits):
+    """Plot the predicted distribution of y_t by each process (context), given that the tone comes from it,
+    p(y_t | c_t = c, H_t) = N(y; mean_c, variance_c), as a background in the colour of the process (blue: std, red: dev).
+    The opacity at each point is p(c_t = c | H_t) x density(y) / maximum of the density at that timestep (its value at
+    the mean, 1 / sqrt(2 pi variance_c)). The two quantities are therefore read separately: the opacity at the mean is
+    the probability of the context, and the vertical fading follows the shape (spread) of the density. NaN predictions
+    (process that cannot be heard at that timestep) are not plotted. The dev density is drawn over the std one.
+
+    Args:
+        ax: axes to plot on
+        context_means: mean of the prediction of y_t by each process, shape (T, N_ctx)
+        context_variances: variance of the same prediction, shape (T, N_ctx)
+        context_probabilities: estimated probability of each context, p(c_t = c | H_t), shape (T, N_ctx)
+        y_limits: (lowest, highest) y value over which the densities are computed and plotted
+    """
+    n_timesteps = context_means.shape[0]
+    y_grid = np.linspace(y_limits[0], y_limits[1], 400)
+    legend_handles = []
+    for i_ctx, context_label in [(STD_CONTEXT, 'std'), (DEV_CONTEXT, 'dev')]:
+        is_predicted = ~np.isnan(context_means[:, i_ctx])
+        means = context_means[is_predicted, i_ctx]
+        variances = context_variances[is_predicted, i_ctx]
+        # Density divided by its maximum (its value at the mean): exp(-(y - mean)^2 / (2 variance)), between 0 and 1;
+        # computed from the mean rather than from the plotted y range, so that a mean outside the panel stays at its
+        # true scale. Timesteps without prediction stay 0
+        scaled_density = np.zeros((len(y_grid), n_timesteps))
+        scaled_density[:, is_predicted] = np.exp(-0.5 * (y_grid[:, np.newaxis] - means) ** 2 / variances)
+        density_image = np.zeros((len(y_grid), n_timesteps, 4))
+        density_image[:, :, :3] = mcolors.to_rgb(CONTEXT_COLORS[i_ctx])
+        density_image[:, :, 3] = context_probabilities[:, i_ctx] * scaled_density
+        ax.imshow(density_image, origin='lower', aspect='auto', interpolation='nearest',
+                  extent=(-0.5, n_timesteps - 0.5, y_limits[0], y_limits[1]))
+        legend_handles.append(Patch(facecolor=CONTEXT_COLORS[i_ctx], label=f'{context_label} density'))
+    ax.set_ylim(y_limits)
+    ax.set_ylabel(r'$p(y_t = y \mid c_t = c, H_t)$', fontsize=8)
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+    ax.legend(handles=legend_handles, loc='center left', bbox_to_anchor=(1.0, 0.5), frameon=False, fontsize=7)
+
+
+def plot_predicted_distribution(ax, predicted_mean, context_means, context_variances, context_probabilities,
+                                y_limits):
+    """Plot the predicted distribution of y_t at each timestep as a purple background, with its mean as a cyan line.
+
+    The predicted distribution is the mixture of the processes' Gaussian predictions (plot_context_predictions),
+    weighted by the estimated probability of each context: sum_c p(c_t = c | H_t) N(y; mean_c, variance_c). A process
+    whose prediction is NaN at t has probability 0 at t and is left out. The purple opacity is the density, linearly
+    scaled at each timestep between 0 and the maximum of that timestep's density on the plotted y range.
+
+    Args:
+        ax: axes to plot on
+        predicted_mean: mean of the predicted distribution of y_t, shape (T,)
+        context_means, context_variances: as in plot_context_predictions, shape (T, N_ctx)
+        context_probabilities: estimated probability of each context, p(c_t = c | H_t), shape (T, N_ctx)
+        y_limits: (lowest, highest) y value over which the density is computed and plotted
+    """
+    n_timesteps = context_means.shape[0]
+    y_grid = np.linspace(y_limits[0], y_limits[1], 400)
+    predicted_density = np.zeros((len(y_grid), n_timesteps))
+    for i_ctx in [STD_CONTEXT, DEV_CONTEXT]:
+        is_predicted = ~np.isnan(context_means[:, i_ctx])
+        means = context_means[is_predicted, i_ctx]
+        variances = context_variances[is_predicted, i_ctx]
+        context_density = np.exp(-0.5 * (y_grid[:, np.newaxis] - means) ** 2 / variances) / np.sqrt(2 * np.pi * variances)
+        predicted_density[:, is_predicted] += context_probabilities[is_predicted, i_ctx] * context_density
+
+    # Linear scaling between 0 and the maximum of each timestep's density; a density that is 0 everywhere on the plotted
+    # y range (all its mass outside of it) stays 0
+    density_maxima = np.max(predicted_density, axis=0)
+    scaled_density = np.divide(predicted_density, density_maxima, out=np.zeros_like(predicted_density),
+                               where=density_maxima > 0)
+    density_image = np.zeros((len(y_grid), n_timesteps, 4))
+    density_image[:, :, :3] = mcolors.to_rgb(PREDICTED_DISTRIBUTION_COLOR)
+    density_image[:, :, 3] = scaled_density
+    ax.imshow(density_image, origin='lower', aspect='auto', interpolation='nearest',
+              extent=(-0.5, n_timesteps - 0.5, y_limits[0], y_limits[1]))
+
+    ax.plot(np.arange(n_timesteps), predicted_mean, color=PREDICTED_MEAN_COLOR, linewidth=1, label='predicted mean')
+    ax.set_ylim(y_limits)
+    ax.set_ylabel(r'$p(y_t = y \mid H_t)$', fontsize=8)
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+
+
+def get_estimate_use_start_timesteps(inference_model, inference_states):
+    """Timestep after which the estimates of each process are computed from the data rather than taken from their
+    start values: the first tone after whose update the number of transitions of the process in the running sums
+    reaches n_transitions_before_using_estimates, under every hypothesis m about the deviant position. The predictions
+    of the process are made with its estimates from the next tone on. The dev process only moves at the deviant
+    position of hypothesis m, so it reaches the threshold at the tone of the latest such position in that trial.
+
+    Args:
+        inference_model: HAudIn instance that produced inference_states
+        inference_states: output of inference_model.inference()
+
+    Returns:
+        dict {STD_CONTEXT: timestep, DEV_CONTEXT: timestep}; None for a process that never reaches the threshold
+    """
+    thresholds = np.broadcast_to(inference_model.n_transitions_before_using_estimates, (inference_model.N_ctx,))
+    # (N_tones, N_trials, N_ctx, N_dpos) -> (N_trials * N_tones, N_ctx, N_dpos), flat tone order t = N_tones * k + j
+    n_transitions = inference_states['n_transitions_ctx_trials_m'].transpose(1, 0, 2, 3).reshape(
+        -1, inference_model.N_ctx, inference_model.N_dpos)
+    estimate_use_start_timesteps = {}
+    for i_ctx in [STD_CONTEXT, DEV_CONTEXT]:
+        threshold_reached = np.all(n_transitions[:, i_ctx, :] >= thresholds[i_ctx], axis=1)
+        if np.any(threshold_reached):
+            estimate_use_start_timesteps[i_ctx] = np.argmax(threshold_reached)
+        else:
+            estimate_use_start_timesteps[i_ctx] = None
+    return estimate_use_start_timesteps
+
+
+def plot_parameter_estimates(ax, inference_model, inference_states, parameter_name, true_values,
+                             comparison_estimates, ylabel, show_legend):
+    """Plot the estimates of one parameter (tau, b or process_noise) of each process, after the merge over the
+    hypotheses m at the end of each trial (inference_states['kf_states_end_trials']): one value per trial, placed at
+    the last tone of the trial so that the x axis stays the timestep axis of the other panels. The true value of the
+    parameter of each process is a dashed horizontal line of the same colour.
+
+    Args:
+        ax: axes to plot on
+        inference_model: HAudIn instance that produced inference_states
+        inference_states: output of inference_model.inference()
+        parameter_name: key of the parameter in each merged predictor: 'tau', 'b' or 'process_noise' (a variance)
+        true_values: true value of the parameter of each process, shape (N_ctx,), index STD_CONTEXT / DEV_CONTEXT
+        comparison_estimates: list of (estimates, color, label) of the same parameter by other models (e.g. the old KF),
+            estimates of shape (T,), one per timestep; plotted at the last tone of each trial, like the HAudIn estimates.
+            Empty list: none
+        ylabel: label of the y axis
+        show_legend: whether to add the std / dev legend
+    """
+    estimates = np.array([kf_state[parameter_name] for kf_state in inference_states['kf_states_end_trials']])
+    trial_end_timesteps = np.arange(inference_model.N_trials) * inference_model.N_tones + inference_model.N_tones - 1
+    for i_ctx, context_label in [(STD_CONTEXT, 'std'), (DEV_CONTEXT, 'dev')]:
+        ax.plot(trial_end_timesteps, estimates[:, i_ctx], color=CONTEXT_COLORS[i_ctx], linewidth=1,
+                marker='o', markersize=2, label=context_label)
+        ax.axhline(true_values[i_ctx], color=CONTEXT_COLORS[i_ctx], linestyle='--', linewidth=1, alpha=0.6,
+                   label=f'{context_label} true value')
+    for estimates_per_timestep, color, label in comparison_estimates:
+        ax.plot(trial_end_timesteps, np.asarray(estimates_per_timestep, dtype=float)[trial_end_timesteps], color=color,
+                linewidth=1, marker='o', markersize=2, label=label)
+    ax.set_ylabel(ylabel, fontsize=8)
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+    if show_legend:
+        ax.legend(loc='center left', bbox_to_anchor=(1.0, 0.5), frameon=False, fontsize=7)
+
+
+def create_stacked_panels(panel_names, fig_width, panel_height_scale):
+    """Create a figure with one panel per name, stacked vertically and sharing the x axis of the first one. Each panel
+    has its own height in inches (PANEL_HEIGHTS, times panel_height_scale), so that adding a panel extends the figure
+    instead of compressing the others. The gaps between panels are fixed in inches (they hold text): a larger one below
+    the first panel, which carries the x tick labels, a small one elsewhere.
+
+    Args:
+        panel_names: names of the panels, from top to bottom; keys of PANEL_HEIGHTS
+        fig_width: width of the figure, in inches
+        panel_height_scale: factor applied to the height of every panel
+
+    Returns:
+        fig, dict {panel name: axes}
+    """
+    # Grid rows: the panels, with an empty row as gap between two consecutive panels (hspace = 0 between rows)
+    row_heights = []
+    for i_panel, panel_name in enumerate(panel_names):
+        if i_panel == 1:
+            row_heights.append(GAP_BELOW_FIRST_PANEL)
+        elif i_panel > 1:
+            row_heights.append(GAP_BETWEEN_PANELS)
+        row_heights.append(PANEL_HEIGHTS[panel_name] * panel_height_scale)
+
+    # The panels fill the whole figure (top=1, bottom=0): the labels and titles outside of it are kept by the
+    # bbox_inches='tight' saving
+    fig = plt.figure(figsize=(fig_width, np.sum(row_heights)))
+    grid = fig.add_gridspec(len(row_heights), 1, height_ratios=row_heights, hspace=0, top=1, bottom=0)
+    axes_by_panel = {panel_names[0]: fig.add_subplot(grid[0])}
+    for i_panel, panel_name in enumerate(panel_names[1:], start=1):
+        axes_by_panel[panel_name] = fig.add_subplot(grid[2 * i_panel], sharex=axes_by_panel[panel_names[0]])
+    return fig, axes_by_panel
+
+
+def plot_obs_and_models(obs, contexts, models, save_path, title=None, show_lik=None,
+                        fig_width=10, panel_height_scale=1,
+                        inference_model=None, inference_states=None, true_dpos=None, true_rules=None,
+                        true_parameters=None, comparison_parameter_estimates=None,
+                        show_category_probabilities=False, show_predicted_distributions=False,
+                        show_estimate_use_start=False, show_parameter_estimates=False):
     """Plot one run: the observation sequence with one or more model predictions +/- 1 SD.
 
     This is pipeline_core_v2.plot_sample's top panel only -- same marks (obs in blue with
@@ -141,6 +411,11 @@ def plot_obs_and_models(obs, contexts, models, save_path, title=None, show_lik=N
     per-model keyword arguments. Predictions are assumed aligned with the observations (one per
     trial, which is how the prediction files are written), so every series shares the same x.
 
+    Optional panels below the main one show the hierarchical inference of a HAudIn instance
+    (kalman_full.py); they need inference_model and inference_states, and all share the x axis
+    (timesteps) of the main panel. Each panel has its own height, so adding panels extends the
+    figure downwards instead of compressing the others.
+
     Args:
         obs: observation sequence for this run, shape (T,)
         contexts: context id per trial, shape (T,); nonzero = deviant, marked in red
@@ -154,6 +429,32 @@ def plot_obs_and_models(obs, contexts, models, save_path, title=None, show_lik=N
             model showing how (log-)likely it is under that model's standard-context predictive
             Gaussian N(mu_pred_std, sigma_pred_std). None (the default) leaves the figure as a
             single panel.
+        fig_width: width of the figure, in inches
+        panel_height_scale: factor applied to the height of every panel (PANEL_HEIGHTS)
+        inference_model: HAudIn instance (kalman_full.py) that produced inference_states; needed by
+            the four options below
+        inference_states: output of inference_model.inference()
+        true_dpos: true deviant position of each timestep (constant within a trial), shape (T,);
+            needed by show_category_probabilities
+        true_rules: true rule of each timestep (constant within a trial), shape (T,); needed by
+            show_category_probabilities
+        true_parameters: dict {'tau', 'b', 'process_noise'} of true parameter values, one per process, shape
+            (N_ctx,), index STD_CONTEXT / DEV_CONTEXT; process_noise is a variance (sigma_q**2); needed by
+            show_parameter_estimates
+        comparison_parameter_estimates: dict {parameter name ('tau', 'b' or 'process_noise'): list of
+            (estimates, color, label)} of the estimates of other models (e.g. the old KF), estimates of shape
+            (T,), one per timestep; a parameter left out of the dict gets no comparison line. None: no
+            comparison lines. Used by show_parameter_estimates
+        show_category_probabilities: add one panel per categorical variable -- context, deviant
+            position, rule -- with the estimated probability of each category at each timestep,
+            over a background coloured with the true category
+        show_predicted_distributions: add two panels: the predicted distribution of y_t by each
+            context (opacity: probability of the context x density scaled to its maximum), and the predicted
+            distribution of y_t (mixture of the contexts' predictions) with its mean
+        show_estimate_use_start: add one vertical line per process, on every panel, after the
+            timestep at which its estimates start being used (n_transitions_before_using_estimates)
+        show_parameter_estimates: add one panel per parameter (tau, b, process noise variance) with
+            the estimates of each process after the merge at the end of each trial
     """
     obs = np.asarray(obs, dtype=float)
     contexts = np.asarray(contexts)
@@ -165,22 +466,28 @@ def plot_obs_and_models(obs, contexts, models, save_path, title=None, show_lik=N
     # the top-border crop. A tenth of an inch of margin removes it.
     mpl.rcParams['savefig.pad_inches'] = 0.1
     show_lik_on = show_lik in ('show_lik', 'show_loglik')
+
+    # Panels, from top to bottom
+    panel_names = ['observations']
     if show_lik_on:
-        # Likelihoods go in a shorter panel below the main one, sharing the trial axis;
-        # height_ratios [3, 1] makes it a third of the top panel's height. hspace leaves room
-        # under the top panel for its trial axis (ticks + label), which sits between the panels.
-        fig, (ax, ax_lik) = plt.subplots(
-            2, 1, figsize=(10, 4), sharex=True,
-            gridspec_kw={'height_ratios': [3, 1], 'hspace': 0.45})
-    else:
-        fig, ax = plt.subplots(1, 1, figsize=(10, 3))
-        ax_lik = None
+        panel_names.append('likelihood')
+    if show_category_probabilities:
+        panel_names += ['context_probabilities', 'dpos_probabilities', 'rule_probabilities']
+    if show_predicted_distributions:
+        panel_names += ['context_predictions', 'predicted_distribution']
+    if show_parameter_estimates:
+        panel_names += ['tau', 'b', 'process_noise']
+    fig, axes_by_panel = create_stacked_panels(panel_names, fig_width, panel_height_scale)
+    inference_panel_names = [name for name in panel_names if name not in ('observations', 'likelihood')]
+    ax = axes_by_panel['observations']
+    if show_lik_on:
+        ax_lik = axes_by_panel['likelihood']
 
     x = np.arange(len(obs))
     obs_line, = ax.plot(x, obs, color='tab:blue', alpha=0.8,
-                        linestyle='-', marker='o', markersize=5)
+                        linestyle='-', markersize=5) # marker='o'
     handles = [obs_line]
-    labels = [r'$y$ (std)']
+    labels = [r'$y_{std}$']
 
     # Same marker over the deviant trials, in red, so context switches stay readable
     # without the separate context panel.
@@ -189,7 +496,7 @@ def plot_obs_and_models(obs, contexts, models, save_path, title=None, show_lik=N
         dev_pts, = ax.plot(x[deviant], obs[deviant], color='tab:red',
                            linestyle='None', marker='o', markersize=5)
         handles.append(dev_pts)
-        labels.append(rf'$y$ (dev)')
+        labels.append(r'$y_{dev}$')
 
     # Draw every overlay the caller assembled, in order: the first is underneath (the LI, when
     # present), later ones on top (the KF variant(s)). Everything downstream -- bands, legend,
@@ -202,15 +509,23 @@ def plot_obs_and_models(obs, contexts, models, save_path, title=None, show_lik=N
         handles.append((band, line))  # one entry per model: line drawn over its band
         labels.append(f'{label}')
 
+    # Start of the use of each process's estimates: one vertical line per process, after the timestep at which its
+    # number of transitions reaches n_transitions_before_using_estimates; drawn on every panel, keyed in this legend
+    if show_estimate_use_start:
+        estimate_use_start_timesteps = get_estimate_use_start_timesteps(inference_model, inference_states)
+        thresholds = np.broadcast_to(inference_model.n_transitions_before_using_estimates, (inference_model.N_ctx,))
+        for i_ctx, context_label in [(STD_CONTEXT, 'std'), (DEV_CONTEXT, 'dev')]:
+            if estimate_use_start_timesteps[i_ctx] is not None:
+                for panel_ax in axes_by_panel.values():
+                    panel_ax.axvline(estimate_use_start_timesteps[i_ctx] + 0.5, color=CONTEXT_COLORS[i_ctx],
+                                     linestyle=':', linewidth=1.2)
+                handles.append(plt.Line2D([0], [0], color=CONTEXT_COLORS[i_ctx], linestyle=':', linewidth=1.2))
+                labels.append(context_label + r' $\hat{\theta}$ start')
+
     ax.margins(x=0)
     ax.set_ylabel('observation process')
     ax.spines['right'].set_visible(False)
     ax.spines['top'].set_visible(False)
-    if show_lik_on:
-        # The trial axis stays in its natural place -- the top panel's own bottom spine. sharex
-        # would hide these tick labels as an "inner" axis, so re-enable them; the widened hspace
-        # seats them (and the 'trial' label) in the gap above the likelihood panel.
-        ax.tick_params(axis='x', labelbottom=True)
     if title is not None:
         # Small font: the parameter title is long, and this keeps it on one line within the
         # 10-inch figure width instead of overflowing (which bbox='tight' would widen to fit).
@@ -219,8 +534,14 @@ def plot_obs_and_models(obs, contexts, models, save_path, title=None, show_lik=N
     # Legend inside the top panel (upper-right, usually clear of the near-zero observations and
     # sparse deviant spikes). frameon=False makes it frameless: no border and a transparent
     # background, so whatever sits behind it shows through.
-    ax.legend(handles, labels, loc='best', frameon=False,
-              handler_map={tuple: HandlerTuple(ndivide=None)})
+    # With the optional inference panels, the legend goes outside on the right, like the legends of those panels
+    # (it also holds more entries then, which would cover the data inside the panel).
+    if len(inference_panel_names) > 0 or show_estimate_use_start:
+        ax.legend(handles, labels, loc='center left', bbox_to_anchor=(1.0, 0.5), frameon=False, fontsize=7,
+                  handler_map={tuple: HandlerTuple(ndivide=None)})
+    else:
+        ax.legend(handles, labels, loc='best', frameon=False,
+                  handler_map={tuple: HandlerTuple(ndivide=None)})
 
     # Optional bottom panel: how surprising each deviant observation is under each model's
     # STANDARD-context predictive Gaussian N(mu_pred_std, sigma_pred_std). A deviant trial is
@@ -255,16 +576,69 @@ def plot_obs_and_models(obs, contexts, models, save_path, title=None, show_lik=N
         ax_lik.spines['top'].set_visible(False)
         ax_lik.spines['right'].set_visible(False)
 
+    # Optional panels: estimated probabilities of the categories of each categorical variable, over the true category
+    if show_category_probabilities:
+        true_contexts = np.where(contexts, DEV_CONTEXT, STD_CONTEXT)
+        plot_category_probabilities(
+            axes_by_panel['context_probabilities'], inference_states['hat_ck'], [STD_CONTEXT, DEV_CONTEXT],
+            ['std', 'dev'], CONTEXT_COLORS, true_contexts, r'$p(c_t = c \mid H_t)$')
+        # p(d_k = m | H_t): (N_tones, N_trials, N_dpos) -> (N_trials * N_tones, N_dpos), flat tone order t = N_tones * k + j
+        dpos_probabilities = inference_states['hat_dk_trials'].transpose(1, 0, 2).reshape(-1, inference_model.N_dpos)
+        dpos_colors = dict(zip(inference_model.dpos_set, DPOS_COLORS))
+        plot_category_probabilities(
+            axes_by_panel['dpos_probabilities'], dpos_probabilities, inference_model.dpos_set,
+            [f'dpos {m}' for m in inference_model.dpos_set], dpos_colors, true_dpos, r'$p(d_k = m \mid H_t)$')
+        rule_values = np.arange(inference_model.N_rules)
+        plot_category_probabilities(
+            axes_by_panel['rule_probabilities'], inference_states['hat_rk'], rule_values,
+            [f'rule {r}' for r in rule_values], RULE_COLORS, true_rules, r'$p(r_k = r \mid H_t)$')
+
+    # Optional pair of panels: prediction of y_t by each context, and their mixture, the predicted distribution of y_t;
+    # same y range as the observation panel
+    if show_predicted_distributions:
+        observation_y_limits = ax.get_ylim()
+        context_probabilities = inference_states['hat_ck']
+        plot_context_predictions(
+            axes_by_panel['context_predictions'], inference_states['hat_y_mean_ctx'],
+            inference_states['hat_y_var_ctx'], context_probabilities, observation_y_limits)
+        plot_predicted_distribution(
+            axes_by_panel['predicted_distribution'], inference_states['hat_y_mean'],
+            inference_states['hat_y_mean_ctx'], inference_states['hat_y_var_ctx'], context_probabilities,
+            observation_y_limits)
+
+    # Optional panels: estimates of each parameter after the merge at the end of each trial
+    if show_parameter_estimates:
+        if comparison_parameter_estimates is None:
+            comparison_parameter_estimates = {}
+        comparison_estimates_by_parameter = {
+            parameter_name: (comparison_parameter_estimates[parameter_name]
+                             if parameter_name in comparison_parameter_estimates else [])
+            for parameter_name in ['tau', 'b', 'process_noise']}
+        plot_parameter_estimates(axes_by_panel['tau'], inference_model, inference_states, 'tau', true_parameters['tau'],
+                                 comparison_estimates_by_parameter['tau'],
+                                 'tau estimate', show_legend=True)
+        plot_parameter_estimates(axes_by_panel['b'], inference_model, inference_states, 'b', true_parameters['b'],
+                                 comparison_estimates_by_parameter['b'],
+                                 'b estimate', show_legend=False)
+        plot_parameter_estimates(axes_by_panel['process_noise'], inference_model, inference_states, 'process_noise',
+                                 true_parameters['process_noise'], comparison_estimates_by_parameter['process_noise'],
+                                 r'$\sigma_q$ estimate', show_legend=False)
+
     # The trial axis lives on the top panel's bottom spine (its natural place). sharex propagates
-    # the limits, so the likelihood panel stays aligned while carrying no x-axis of its own: no
-    # ticks/labels, and for the log-likelihood view (bars hanging from the 0 line) not even a
-    # bottom spine, which would sit far below the data and only clutter.
+    # the limits, so the panels below stay aligned while carrying no x tick labels of their own --
+    # except the last of the optional inference panels, which repeats the trial axis at the bottom
+    # of the figure. For the log-likelihood view (bars hanging from the 0 line) the likelihood panel
+    # has no bottom spine either, which would sit far below the data and only clutter.
     ax.set_xlim(-0.5, len(obs) - 0.5)
     ax.set_xlabel('trial')
     if show_lik_on:
         ax_lik.tick_params(axis='x', bottom=False, labelbottom=False)
         if as_log:
             ax_lik.spines['bottom'].set_visible(False)
+    for panel_name in inference_panel_names[:-1]:
+        axes_by_panel[panel_name].tick_params(axis='x', labelbottom=False)
+    if len(inference_panel_names) > 0:
+        axes_by_panel[inference_panel_names[-1]].set_xlabel('trial')
 
     fig.savefig(save_path, bbox_inches='tight', dpi=600)
     plt.close(fig)
