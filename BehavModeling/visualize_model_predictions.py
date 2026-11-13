@@ -242,9 +242,9 @@ def plot_context_predictions(ax, context_means, context_variances, context_proba
         density_image[:, :, 3] = context_probabilities[:, i_ctx] * scaled_density
         ax.imshow(density_image, origin='lower', aspect='auto', interpolation='nearest',
                   extent=(-0.5, n_timesteps - 0.5, y_limits[0], y_limits[1]))
-        legend_handles.append(Patch(facecolor=CONTEXT_COLORS[i_ctx], label=f'{context_label} density'))
+        legend_handles.append(Patch(facecolor=CONTEXT_COLORS[i_ctx], label=rf'$p(y_t = y \mid c_t = \mathrm{{{context_label}}}, H_t)$'))
     ax.set_ylim(y_limits)
-    ax.set_ylabel(r'$p(y_t = y \mid c_t = c, H_t)$', fontsize=8)
+    ax.set_ylabel('$y$', fontsize=8)
     ax.spines['top'].set_visible(False)
     ax.spines['right'].set_visible(False)
     ax.legend(handles=legend_handles, loc='center left', bbox_to_anchor=(1.0, 0.5), frameon=False, fontsize=7)
@@ -287,11 +287,14 @@ def plot_predicted_distribution(ax, predicted_mean, context_means, context_varia
     ax.imshow(density_image, origin='lower', aspect='auto', interpolation='nearest',
               extent=(-0.5, n_timesteps - 0.5, y_limits[0], y_limits[1]))
 
-    ax.plot(np.arange(n_timesteps), predicted_mean, color=PREDICTED_MEAN_COLOR, linewidth=1, label='predicted mean')
+    ax.plot(np.arange(n_timesteps), predicted_mean, color=PREDICTED_MEAN_COLOR, linewidth=1)
     ax.set_ylim(y_limits)
-    ax.set_ylabel(r'$p(y_t = y \mid H_t)$', fontsize=8)
+    ax.set_ylabel('$y$', fontsize=8)
     ax.spines['top'].set_visible(False)
     ax.spines['right'].set_visible(False)
+    legend_handles = [Patch(facecolor=PREDICTED_DISTRIBUTION_COLOR, label=r'$p(y_t = y \mid H_t)$'),
+                      plt.Line2D([0], [0], color=PREDICTED_MEAN_COLOR, label=r'$\mathbb{E}[y_t \mid H_t]$')]
+    ax.legend(handles=legend_handles, loc='center left', bbox_to_anchor=(1.0, 0.5), frameon=False, fontsize=7)
 
 
 def get_estimate_use_start_timesteps(inference_model, inference_states):

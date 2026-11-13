@@ -8,7 +8,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from model_RTs import prepare_trials_data
 from kalman_full import HAudIn, STD_CONTEXT
-from BehavModeling.visualize_leaky_vs_kf_predictions import plot_obs_and_models
+from BehavModeling.visualize_model_predictions import plot_obs_and_models
 
 
 if __name__ == "__main__":
@@ -38,7 +38,7 @@ if __name__ == "__main__":
     cue_to_index = {'cue_1': 1, 'cue_2': 0}  # TODO: fill here
 
     # Suffix
-    suffix = "_start-truevals"
+    suffix = "_start-truevals-statmean"
 
     for sub in subjects:
         # Load experimental sequences (one session, 4 runs)
@@ -64,7 +64,7 @@ if __name__ == "__main__":
                                "q": q,
                                "estimate_process_noise": True,
                                "n_transitions_before_using_estimates": (24, 3),
-                               "prior_state_means":  [y[0], y[0]],
+                               "prior_state_means": run_trials.loc[0, ['lim_std', 'lim_dev']].to_numpy(dtype=float), #  [y[0], y[0]],
                                "prior_state_vars": [sigma_stat ** 2, sigma_stat ** 2],
                                "tau_init": true_taus,
                                "b_init": run_trials.loc[0, ['lim_std', 'lim_dev']].to_numpy(dtype=float), # [y[0], y[0]],
@@ -76,7 +76,7 @@ if __name__ == "__main__":
             inf_states = full_inf.inference()
 
             # Store predictions
-            full_inf.save_inference(inf_states, os.path.join(fullinf_pred_dir, f'fullinf_predictions_sub-{sub}_ses-1_run_{run_n}.csv'))
+            full_inf.save_inference(inf_states, os.path.join(fullinf_pred_dir, f'fullinf_predictions_sub-{sub}_ses-1_run_{run_n}_tau_std_{true_taus[0]:g}.csv'))
 
             # Old KF predictions of this run
             old_kf_run_df = old_kf_df[old_kf_df['run_id'] == run_n].reset_index(drop=True)
@@ -91,7 +91,7 @@ if __name__ == "__main__":
                 obs=run_trials['observation'],
                 contexts=run_trials['contexts'],
                 models=models,
-                save_path=os.path.join(figures_dir, f'kf_versions_sub-{sub}_ses-1_run_{run_n}{suffix}.png'),
+                save_path=os.path.join(figures_dir, f'kf_versions_sub-{sub}_ses-1_run_{run_n}_tau_std_{true_taus[0]:g}{suffix}.png'),
                 title=f'sub-{sub}, run {run_n}',
                 fig_width=fig_width,
                 panel_height_scale=panel_height_scale,
@@ -107,7 +107,7 @@ if __name__ == "__main__":
                 show_predicted_distributions=show_predicted_distributions,
                 show_estimate_use_start=show_estimate_use_start,
                 show_parameter_estimates=show_parameter_estimates,
-                show_lik='show_lik'
+                # show_lik='show_lik'
             )
 
 

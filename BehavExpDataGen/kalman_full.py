@@ -48,15 +48,7 @@ def combine_pdk_until_j(inf_states, trial_k, j):
 
     return p_dk_m_j
 
-def combine_pctx_until_j(inf_states, trial_k, j):
-    """Combine fixed p(c_t = c | H_t) of previous trials's timesteps
-    with m-hypothesis p(c_t = c | H_t) of the current trial until timestep j.
 
-    So that for each context, p(c_t = c | H_t)_{:j} = p(c_t = c | H_t)_{t=1:end of trial k-1} + p(c_t = c | H_t)_{t=t_k:j}
-
-    """
-    pass
-    # return p_c_m_j
 
 
 
@@ -75,7 +67,7 @@ class HAudIn():
                  y,
                  q,
                  estimate_process_noise,
-                 n_transitions_before_using_estimates,
+                 min_transitions_before_PE,
                  prior_state_means,
                  prior_state_vars,
                  tau_init,
@@ -113,7 +105,7 @@ class HAudIn():
         # - process noise estimated or given (if given, its value is the one of the start state of trial 0)
         # - and start-up rule of the estimates (one int, or one per process, shape (N_ctx,))
         self.estimate_process_noise = estimate_process_noise
-        self.n_transitions_before_using_estimates = n_transitions_before_using_estimates
+        self.min_transitions_before_PE = min_transitions_before_PE
 
         # Start of the online Kalman filter (6a), one value per process, shape (N_ctx,), index STD_CONTEXT / DEV_CONTEXT:
         # - prior_state_means, prior_state_vars: mean and variance of the belief about each state at its first tone
@@ -131,10 +123,6 @@ class HAudIn():
         for r in range(self.N_rules):
             is_dpos_of_rule = np.isin(self.dpos_set, self.rules_dpos_set[r])
             self.P_D[r, is_dpos_of_rule] = 1 / self.rules_dpos_set[r].size
-
-        # Minimum observations / trials required for EM (only used by kalman_filter_trial_draft)
-        self.min_obs_for_em     = kf.MIN_OBS_FOR_EM
-        self.min_trials_for_em  = self.min_obs_for_em
 
         # Re-organize y and q data in trials long of N_tones timesteps (flat order: t = N_tones * k + j):
         self.y_trials = self.y.reshape(self.N_trials, self.N_tones).T # shape: (N_tones, N_trials)
@@ -169,8 +157,8 @@ class HAudIn():
         hat_tau_ctx_trials_m = np.zeros((self.N_tones, self.N_trials, self.N_ctx, self.N_dpos))
         hat_b_ctx_trials_m = np.zeros((self.N_tones, self.N_trials, self.N_ctx, self.N_dpos))
         hat_process_noise_ctx_trials_m = np.zeros((self.N_tones, self.N_trials, self.N_ctx, self.N_dpos))
-        # Number of transitions (moves) of each process in the running sums of the estimates, under each hypothesis m, after
-        # the update with y_t (compared with n_transitions_before_using_estimates); shape: N_tones, N_trials, N_ctx, N_dpos
+        # Number of updates of each process in the running sums of the estimates, under each hypothesis m, after
+        # the update with y_t (compared with min_transitions_before_PE); shape: N_tones, N_trials, N_ctx, N_dpos
         n_transitions_ctx_trials_m = np.zeros((self.N_tones, self.N_trials, self.N_ctx, self.N_dpos), dtype=int)
         lik_y_trials_m = np.zeros((self.N_tones, self.N_trials, self.N_dpos)) # shape: N_tones, N_trials, N_dpos; l_t(m) (7), one per hypothesis m (self.dpos_set)
         # self.hat_y_trials = np.zeros((self.N_tones, self.N_trials)) # shape: N_tones, N_trials; prediction marginalized over hypotheses m
@@ -178,9 +166,6 @@ class HAudIn():
         # # Theoretical
         # # 1: p(c_t = dev | d_k = m) for the tone at position j: 1 if j == m, else 0; 0: p(c_t = std | d_k = m) shape (N_tones, N_dpos)
         # self.P_C = (np.arange(self.N_tones)[:, np.newaxis] == self.dpos_set[np.newaxis, :]).astype(float)
-
-        # p(c_t = c | H_t, d_k = m); shape (N_tones, N_trials, N_ctx, N_dpos) # NOTE: only used by kalman_filter_trial_draft
-        p_c_m = np.zeros((self.N_tones, self.N_trials, self.N_ctx, self.N_dpos))
 
         # p(c_t = c | H_t); shape (N_tones, N_trials, N_ctx) # NOTE: inferred at end of trials only. Only used by kalman_filter_trial_draft
         p_c = np.zeros((self.N_tones, self.N_trials, self.N_ctx))
@@ -213,8 +198,6 @@ class HAudIn():
             'hat_process_noise_ctx_trials_m': hat_process_noise_ctx_trials_m,
             'n_transitions_ctx_trials_m': n_transitions_ctx_trials_m,
             'lik_y_trials_m': lik_y_trials_m,
-            # 'P_C': P_C,
-            'p_c_m': p_c_m,
             'p_c': p_c,
             'kf_params_m': [],
             'rk_end_trials': rk_end_trials,
@@ -254,7 +237,7 @@ class HAudIn():
         trial k-1, inf_states['kf_state'] (6a).
 
         Under m, the tone at position j comes from dev if j == m and from std otherwise (context probabilities 0 or
-        1); std moves at every tone, dev moves once per trial, at j == m, from trial 1 (table of Step 4).
+        1); std is updated at every tone, dev is updated once per trial, at j == m, from trial 1 (table of Step 4).
 
         Fills, for trial k and each m: inf_states['hat_y_mean_ctx_trials_m'], inf_states['hat_y_var_ctx_trials_m'] (prediction of
         y_t by each process, (6): mean of the predicted state, and its VARIANCE plus the observation noise),
@@ -296,15 +279,15 @@ class HAudIn():
                 else:
                     context_probabilities[STD_CONTEXT] = 1
 
-                # std moves at every tone except the first tone of trial 0, whose state is the prior itself; dev moves once
+                # std is updated at every tone except the first tone of trial 0, whose state is the prior itself; dev is updated once
                 # per trial, at the deviant's position, from trial 1 (during trial 0 its state is the prior itself)
-                contexts_moving = np.zeros(self.N_ctx, dtype=bool)
-                contexts_moving[STD_CONTEXT] = not (k == 0 and j == 0)
-                contexts_moving[DEV_CONTEXT] = (j == m) and (k >= 1)
+                contexts_updated = np.zeros(self.N_ctx, dtype=bool)
+                contexts_updated[STD_CONTEXT] = not (k == 0 and j == 0)
+                contexts_updated[DEV_CONTEXT] = (j == m) and (k >= 1)
 
                 pred_means, pred_vars, kf_state = kf.kalman_online_step_multicontext(
                     self.y_trials[j, k], context_probabilities, kf_state, observation_noise,
-                    self.estimate_process_noise, self.n_transitions_before_using_estimates, contexts_moving
+                    self.estimate_process_noise, self.min_transitions_before_PE, contexts_updated
                 )
                 inf_states['hat_y_mean_ctx_trials_m'][j, k, :, i_m] = pred_means
                 inf_states['hat_y_var_ctx_trials_m'][j, k, :, i_m] = pred_vars
@@ -318,48 +301,6 @@ class HAudIn():
         inf_states['kf_states_m'] = kf_states_m
         return inf_states
 
-    def kalman_filter_trial_draft(self, inf_states, k, observation_noise=None, n_iter=5):
-        """Applies the online EM-fitting Kalman filter to previous observations
-        (of the current trial, under the hypothesis that m is the dpos of the current trial;
-        the previous trials are already fixed)
-        """
-        if observation_noise is None:
-            observation_noise = self.observation_noise_var
-
-        # Get most recent estimation of d_{k-1}
-        hat_dk_prev = inf_states['hat_dk'][-1]
-
-        # Update p(ctx_t = c)_{:end of trial k-1} by adding last trial's p(ctx_t = c)_{t=j for every j in k-1} according to k-1 end's hat_dk
-        inf_states['p_c'][:, k-1, :] = inf_states['p_c_m'][:, k-1, :, hat_dk_prev - self.dpos_min]
-
-        # Duplicate p(ctx_t = c)_{:end of trial k-1} m times
-        # and add p(ctx_t = c | d_k = m)_{t in trial k} to it for each m
-        p_c_k_m = np.repeat(inf_states['p_c'][:, :k, :, np.newaxis], self.N_dpos, axis=-1) # shape: N_tones, N_trials, N_ctx, N_dpos
-        p_dk_k_m = []
-        for m in range(self.N_dpos):
-            p_dk_m = np.array([1 if m==j else 0 for j in self.N_tones])
-            p_dk_k_m.append(p_dk_m)
-        p_dk_k_m = np.array([p_dk_k_m]).transpose() # shape: (N_dpos, N_tones)
-        p_c_k_m = np.stack([p_c_k_m, p_dk_k_m], axis=0) # shape: (N_tones, N_trials, N_ctx, N_dpos)
-
-        # Flatten p_c_k_m (N_tones, N_trials) axes into a continuous one:
-        p_c_k_m_flat = p_c_k_m.transpose(1, 0, 2, 3).reshape(self.N_trials * self.N_tones, self.N_ctx, self.N_dpos)
-
-        # Infer for each m
-        for m in range(self.N_dpos):
-            # Run online-fit KF
-            _, _, _, per_ctx_mu_pred, per_ctx_var, kf_params = kf.kalman_online_fit_predict_multicontext(
-                self.y[:(k+1)*self.N_tones], p_c_k_m_flat[:,:,m],
-                return_per_ctx=True, return_params=True,
-                observation_noise=observation_noise, n_iter=5,
-            )
-
-            # Only store the predictions for the current trial k
-            inf_states['hat_y_mean_trials_m'][:, k, :, m - self.dpos_min] = per_ctx_mu_pred[-self.N_tones:,:]
-            inf_states['hat_y_var_trials_m'][:, k, :, m - self.dpos_min] = per_ctx_var[-self.N_tones:,:]
-            inf_states['kf_params_m'].append(kf_params)
-
-        return inf_states
 
 
     def merge_kf_states_over_dpos(self, kf_states_m, dpos_weights, kf_state_trial_start):
@@ -397,14 +338,14 @@ class HAudIn():
             sums_m = np.array([kf_state[sum_name] for kf_state in kf_states_m]) # (N_dpos, N_ctx)
             merged_kf_state[sum_name] = np.sum(weights * sums_m, axis=0)
 
-        # Number of moves of each process: the same under every m
+        # Number of updates of each process: the same under every m
         merged_kf_state['n_transitions'] = kf_states_m[0]['n_transitions']
 
         merged_kf_state['tau'], merged_kf_state['b'], merged_kf_state['process_noise'] = kf.online_parameter_estimates(
             merged_kf_state['tau_numerator_sum'], merged_kf_state['tau_denominator_sum'], merged_kf_state['b_sum'],
             merged_kf_state['process_noise_sum'], merged_kf_state['n_transitions'],
             kf_state_trial_start['tau'], kf_state_trial_start['b'], kf_state_trial_start['process_noise'],
-            np.ones(self.N_ctx, dtype=bool), self.estimate_process_noise, self.n_transitions_before_using_estimates
+            np.ones(self.N_ctx, dtype=bool), self.estimate_process_noise, self.min_transitions_before_PE
         )
         return merged_kf_state
 
@@ -606,7 +547,7 @@ class HAudIn():
         inf_df['estimate_process_noise'] = self.estimate_process_noise
         inf_df['observation_noise_sir'] = self.observation_noise_sir
         start_values = {
-            'n_transitions_before_using_estimates': np.broadcast_to(self.n_transitions_before_using_estimates, (self.N_ctx,)),
+            'min_transitions_before_PE': np.broadcast_to(self.min_transitions_before_PE, (self.N_ctx,)),
             'prior_state_mean': self.prior_state_means,
             'prior_state_var': self.prior_state_vars,
             'tau_init': self.tau_init,
