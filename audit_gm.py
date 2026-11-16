@@ -1038,7 +1038,7 @@ class HierarchicalAuditGM(AuditGenerativeModel):
         if "rules_cmap" in params.keys():
             self.rules_cmap = params["rules_cmap"]
         else:
-            colors = {0: "tab:blue", 1: "tab:red", 2: "tab:orange"}
+            colors = {0: "tab:purple", 1: "tab:orange", 2: "tab:grey"}
             self.rules_cmap = {i: colors[i] for i in range(self.N_rules)}
             pass
 
@@ -1797,6 +1797,15 @@ class HierarchicalAuditGM(AuditGenerativeModel):
         plt.title(f"{title_line1}\n{title_line2}", y=-0.2)
         fig.tight_layout()
         #plt.show()
+
+
+
+class HierarchicalAuditGMCorrectedStates(HierarchicalAuditGM):
+    '''Hierarchical audit generative model whose hidden states are sampled with
+    sample_states_corr: generate_run calls it in place of sample_states.'''
+
+    sample_states = AuditGenerativeModel.sample_states_corr
+
 
 
 

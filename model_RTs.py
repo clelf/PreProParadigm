@@ -21,9 +21,11 @@ from matplotlib.offsetbox import AnchoredOffsetbox, HPacker, TextArea
 base_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '../'))
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../')))
 if os.path.exists(os.path.join(base_path, 'Kalman')):
-    from Kalman.kalman import MIN_OBS_FOR_EM, kalman_online_fit_predict_multicontext, likelihood_observation, contexts_to_probabilities
+    from Kalman.kalman_fit_em import MIN_OBS_FOR_EM, kalman_online_fit_predict_multicontext
+    from Kalman.kalman_core import likelihood_observation, contexts_to_probabilities
 elif os.path.exists(os.path.join(base_path, 'KalmanFilterViz1D')):
-    from KalmanFilterViz1D.kalman import MIN_OBS_FOR_EM, kalman_online_fit_predict_multicontext, likelihood_observation, contexts_to_probabilities
+    from KalmanFilterViz1D.kalman_fit_em import MIN_OBS_FOR_EM, kalman_online_fit_predict_multicontext
+    from Kalman.kalman_core import likelihood_observation, contexts_to_probabilities
 else:
     raise ImportError("Neither 'Kalman' nor 'KalmanFilterViz1D' folder found.")
 

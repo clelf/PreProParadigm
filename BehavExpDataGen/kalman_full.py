@@ -8,9 +8,10 @@ import os
 WORKSPACE = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
 sys.path.insert(0, WORKSPACE)
 if os.path.exists(os.path.join(WORKSPACE, 'Kalman')):
-    import Kalman.kalman as kf
+    import Kalman.kalman_fit_recursive as kf
+    from Kalman.kalman_core import likelihood_observation
 elif os.path.exists(os.path.join(WORKSPACE, 'KalmanFilterViz1D')):
-    import KalmanFilterViz1D.kalman as kf
+    import KalmanFilterViz1D.kalman_fit_recursive as kf
 else:
     raise ImportError("Neither 'Kalman' nor 'KalmanFilterViz1D' folder found.")
 
@@ -444,7 +445,7 @@ class HAudIn():
             # inf_states['lik_y_trials'][j, trial_k, :] = np.sum(p_dk_j * inf_states['lik_y_trials_m'][j, trial_k, :]) # sum over m; verify that it yields the same as: p(d_k = j | H_t) · N(y_t; μ^dev_k, S^dev_k)  +  Σ_{m≠j} p(d_k = m | H_t) · N(y_t; μ^std_t(m), S^std_t(m))
 
             # Evaluate likelihood of y_t under the KF predictions under different m hypotheses (7)
-            inf_states['lik_y_trials_m'][j, trial_k, :] = kf.likelihood_observation(self.y_trials[j, trial_k], hat_y_mean_m, hat_y_var_m) # Evaluate y_t under the Kalman-estimated predictions for y_t, for different m hypotheses
+            inf_states['lik_y_trials_m'][j, trial_k, :] = likelihood_observation(self.y_trials[j, trial_k], hat_y_mean_m, hat_y_var_m) # Evaluate y_t under the Kalman-estimated predictions for y_t, for different m hypotheses
 
             # End of trial:
             if j == self.N_tones - 1:
