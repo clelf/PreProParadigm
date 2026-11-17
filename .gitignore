@@ -12,5 +12,5 @@
 *.out
 *.err
 utils/
-[obsolete]/
-BehavModeling/[extra figure scripts]/
+\[obsolete\]/
+BehavModeling/\[extra figure scripts\]/
