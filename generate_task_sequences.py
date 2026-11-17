@@ -701,7 +701,7 @@ class trials_master:
 
                 run_unique = trials_run.drop_duplicates(subset="trial_n")
 
-            self.get_kalman_likelihoods_clem(trials_path, s, trials_final, tau_std, run_obj['pi_rules'])
+            #self.get_kalman_likelihoods_clem(trials_path, s, trials_final, tau_std, run_obj['pi_rules'])
             
 if __name__ == "__main__":
 

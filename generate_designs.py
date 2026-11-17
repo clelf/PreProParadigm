@@ -128,9 +128,9 @@ class rando_master:
             a_all = draw_positions(self)
 
             # create random run order
-            run_full = [list(p) for p in permutations(np.arange(0,self.config['n_runs']))] 
-            np.random.shuffle(run_full) 
-            run_orders = run_full[0:self.config['n_sessions']]
+            #run_full = [list(p) for p in permutations(np.arange(0,self.config['n_runs']))] 
+            #np.random.shuffle(run_full) 
+            #run_orders = run_full[0:self.config['n_sessions']]
 
             rows = []
 
@@ -139,13 +139,13 @@ class rando_master:
                 # assign A levels to BC combos
                 current_a = a_all[s]
 
-                session_trials = []
+                #session_trials = []
 
                 for i in range(self.config['n_runs']):
 
                     B, C = bc_combos[i]
 
-                    session_trials.append({
+                    rows.append({
                         "session": s + 1,
                         "run": i + 1,
                         "a_level": current_a[i],
@@ -154,19 +154,26 @@ class rando_master:
                     })
 
                 # apply session-specific run order 
-                reordered = [session_trials[idx] for idx in run_orders[s]] 
+                #reordered = [session_trials[idx] for idx in run_orders[s]] 
 
-                for r, cond in enumerate(reordered): 
-                    cond["run"] = r + 1 
-                    rows.append(cond)
+                #for r, cond in enumerate(reordered): 
+                #    cond["run"] = r + 1 
+                #    rows.append(cond)
 
             # create df with session infos
             df = pd.DataFrame(rows)
             df = df[["session", "run", "a_level", "b_level", "c_level"]]
 
             # check balance
-
             print('----- experimental design -----')
+
+            print("\nA occurrence by run position:")
+            print(
+                pd.crosstab(
+                    df["a_level"],
+                    df["run"]
+                )
+            )
 
             print("\nA counts:")
             print(df["a_level"].value_counts())
@@ -201,7 +208,7 @@ class rando_master:
             print('---------------------------------')
 
         
-        df.to_csv(f'{self.config['out_dir']}/{self.config['participant']}_design.csv', index=False)
+        df.to_csv(f"{self.config['out_dir']}/{self.config['participant']}_design.csv", index=False)
         
         return df
     
@@ -282,7 +289,7 @@ class rando_master:
 if __name__ == "__main__":
 
     subs = [f"sub-{i:02d}" for i in range(1, 11)]
-    cue_names = ['triangle', 'cicle', 'square', 'diamond','hourglass','dome','x','star','crown','heart','hexagon','flower']
+    cue_names = ['triangle', 'circle', 'square', 'diamond','hourglass','dome','x','star','crown','heart','hexagon','flower']
 
     for sub in subs:
 
