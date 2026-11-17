@@ -7,7 +7,7 @@ import pandas as pd
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from model_RTs import prepare_trials_data
-from kalman_full import HAudIn, STD_CONTEXT
+from models.kalman_full import HAudIn, STD_CONTEXT
 from BehavModeling.visualize_model_predictions import plot_obs_and_models
 
 

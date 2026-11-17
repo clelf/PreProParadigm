@@ -12,6 +12,9 @@ from model_RTs import prepare_trials_data
 # KF's MIN_OBS_FOR_EM warm-up so the two models stay aligned (early predictions are NaN).
 MIN_OBS_FOR_LI = 3
 
+FILE_PREFIX = "leaky_predictions"
+
+
 
 def leaky_average_masked(y, is_std, taus, s_floor=0.0):
     """Masked leaky integrator: predictive mean / std / log-lik for every tau, every t.

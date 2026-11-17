@@ -11,3 +11,6 @@
 *.dcm
 *.out
 *.err
+utils/
+[obsolete]/
+BehavModeling/[extra figure scripts]/

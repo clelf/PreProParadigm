@@ -30,7 +30,7 @@ from tqdm import tqdm
 FILE_PREFIX = "leaky_predictions"
 
 
-from leaky_integrator import *
+from models.leaky_integrator import *
 
 
 if __name__ == "__main__":

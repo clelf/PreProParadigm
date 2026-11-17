@@ -31,7 +31,7 @@ WORKSPACE_ROOT = PREPROPARADIGM_DIR.parent
 sys.path.append(str(WORKSPACE_ROOT / 'RNN_paradigm' / 'RNN' / 'model_analysis'))
 
 import analysis_config as cfg
-from compute_mse_by_position_gm_test import KALMAN_FILTER_NAME, get_condition_name, get_sequence_name
+from test_sample_states_version.compute_mse_by_position_gm_test import KALMAN_FILTER_NAME, get_condition_name, get_sequence_name
 
 
 def get_sequence_correlation(probabilities_df, prediction_column):
