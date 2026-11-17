@@ -12,4 +12,4 @@ Clémentine Lévy-Fidel:
  
 Jasmin Stein:
 - experimental design (generate_designs.py, ITI.py, generate_task_sequences(_training).py, compare_sequences_models.py, digit_span.py)
-- experimental implementation (auditPrePro_ ... .py scrips)
+- experimental implementation (auditPrePro_ ... .py scripts)
