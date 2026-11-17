@@ -1,18 +1,15 @@
-# PreProParadigm
+# Investigating Auditory Predictive Processing in Corticofugal Circuits
 
-Clémentine's part:
+This repository contains code related to the experimental design & experimental implementation, computational modeling and behavioral data analyses
+of the project [add link to OSF preregistration (embargoed)].
 
-- Generative model class (audit_gm.py)
-- Modelling RTs (model_RTs.py, compute_predictions_and_likelihoods.py, compare_RT_subj3_4sess.py)
+Author contributions:
 
-Jasmin's part:
-
-- Data sequence generation (generate_task_sequences(_training).py)
-- Experiment implementation:
-    - main task fMRI: (auditPrePro_fmri.py)
-    - main task training: (auditPrePro_training.py)
-    - main task refresher: (auditPrePro_refresher.py)
-    - functional localizer: (auditPrePro_localizer.py)
-    - sound check: (auditPrePro_sound_check.py)
-    - digit span implementation (digit_span.py)
-    - auxiliary things related to experimental design (ITI.py, generate_designs.py, add_itis_cues.py)
+Clémentine Lévy-Fidel:
+- generative model (audit_gm.py)
+- computational model (https://github.com/clelf/RNN_HierarchicalAuditory)
+- bhevaioral modeling (compute_ ... .py and compare_ ... .py +  visualization)
+ 
+Jasmin Stein:
+- experimental design (generate_designs.py, ITI.py, generate_task_sequences(_training).py, compare_sequences_models.py, digit_span.py)
+- experimental implementation (auditPrePro_ ... .py scrips)
