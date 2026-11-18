@@ -2,6 +2,7 @@ import os
 import pandas as pd
 import numpy as np
 import sys
+from tqdm import tqdm
 
 # Reuse the exact same data preparation as the KF pipeline.
 sys.path.append(os.path.abspath(os.path.dirname(__file__)))

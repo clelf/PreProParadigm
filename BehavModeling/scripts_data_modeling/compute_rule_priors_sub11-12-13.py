@@ -3,9 +3,9 @@
 Subjects 11/12/13 have a cue on every trial, with a known cue<->rule association
 [[0.8, 0.2], [0.2, 0.8]] and no null rule. The cue is a second, independent observation of the
 latent rule, so it enters the rule prior by Bayes' rule -- transition-prior x cue-likelihood,
-renormalized (a PRODUCT, not a mixture). `compute_dev_likelihoods_over_rules` now detects the
-`cue` column and swaps `pior_dpos_given_prev_rule_and_stds` for its cue-aware counterpart
-`pior_dpos_given_prev_rule_cue_and_stds` automatically (see PreProParadigm/model_RTs.py).
+renormalized (a PRODUCT, not a mixture). When the trials have a `cue` column,
+`compute_dev_likelihoods_over_rules` uses `prior_tone_is_dev_given_prev_rule_cue_and_prev_stds`
+instead of `prior_tone_is_dev_given_prev_rule_and_prev_stds` (see PreProParadigm/model_RTs.py).
 
 This driver just applies that step to the already-computed deviant-likelihood CSVs, adding the
 `prior_dpos_rules_{std,dev}` and `likelihood_obs_std_at_dev_over_rules` columns. It needs no
@@ -35,11 +35,12 @@ SUBS = ['11', '12', '13']
 SESS = 1
 SIGMA_R = 0.02
 
-# 2x2 NO-NULL-RULE transition matrix -- these subjects only ever see rules {0, 1}. This must NOT be
-# the 04/05/06 3x3: although the cue-aware prior renormalizes over rules {0, 1} (so only the 0<->1
-# transition RATIO survives), that ratio is 0.8:0.1 = 8:1 under the 3x3 but 0.8:0.2 = 4:1 here --
-# a different prior, not an equivalent one. The transition-only (`_nocue`) prior is worse off still:
-# it does not renormalize, so a 3x3 leaves the rule weights summing to 0.9 instead of 1.0.
+# 2x2 transition matrix without null rule: these subjects only have rules 0 and 1. The 3x3 matrix of
+# subjects 04/05/06 would give different priors:
+# - with the cue, the rule belief is normalized over rules 0 and 1, so only the ratio
+#   pi_rule[r_prev, 0] : pi_rule[r_prev, 1] matters: for r_prev = 0, 8:1 under the 3x3, 4:1 here;
+# - without the cue (`_nocue` columns), the sum runs over every rule of pi_rule, so the 3x3 would add
+#   a null rule with weight 0.1, which these subjects never have.
 PI_RULE = np.array([
     [0.8, 0.2],
     [0.2, 0.8],
@@ -56,10 +57,9 @@ def _augment(sub, trials_path, results_path):
     """Add cue-aware (and, for QC, transition-only) rule-weighted likelihood columns; save in place."""
     results_df = pd.read_csv(results_path)
 
-    # ONE call now yields both the cue-aware rule prior AND its transition-only (`_nocue`) QC
-    # counterpart: compute_dev_likelihoods_over_rules computes the latter from the SAME PI_RULE
-    # whenever the trials carry a `cue` column. That guarantees the two share one matrix, and makes
-    # the cue-stripped temp-file round-trip this used to do unnecessary.
+    # One call gives both the prior with the cue and the prior without it (`_nocue` columns):
+    # compute_dev_likelihoods_over_rules computes both from the same PI_RULE when the trials have a
+    # `cue` column.
     cue_df = compute_dev_likelihoods_over_rules(
         trials_path, results_df.copy(), sub, SESS, PI_RULE, cue_rule_lik=DEFAULT_CUE_RULE_LIK)
 

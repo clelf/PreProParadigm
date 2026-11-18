@@ -69,8 +69,8 @@ from model_RTs import (
     compare_likelihoods_with_RTs_per_subject_runmeans_models_single_session,
     compare_likelihoods_with_RTs_per_run_and_subject_models,
     compare_likelihoods_with_RTs_per_run_and_subject_models_single_session,
-    collect_perrun_models_R2,
-    collect_perrun_models_R2_single_session,
+    get_perrun_models_R2,
+    get_perrun_models_R2_single_session,
     plot_perrun_models_R2_violins_per_subject,
     plot_model_R2_cohensd_heatmap_per_subject,
     plot_model_R2_cohensd_heatmap_and_violins_per_subject,
@@ -87,7 +87,6 @@ if __name__ == "__main__":
     # Optional flags -- set once, applied uniformly to all five figures.
     LOGRT = True          # regress log(RT) instead of raw RT
     LOGLIK = True         # use log-likelihood instead of raw likelihood on the x-axis
-    SIGMA_R_FILES = True  # kalman_pred uses the current `_sigma_r_{si_r}` naming
     # Trial selection / RT reference -- a single switch between two mutually exclusive modes:
     #   False -> CORRECT-ONLY (the previous `correcttrials=True` behaviour): keep only trials the
     #            subject answered at the right position (dpos == key_pressed, i.e. correct==1), with
@@ -174,36 +173,30 @@ if __name__ == "__main__":
     )
     # `corr` deliberately does NOT ride in `shared_kwargs`: only the four scatter-grid figures
     # annotate a rho and so accept it (it joins `grid_kwargs` below). Figures 3/4/4b and the R2
-    # collectors take no `corr` at all -- their R2 is the OLS one by construction -- so passing it
+    # functions take no `corr` at all -- their R2 is the OLS one by construction -- so passing it
     # here would be a TypeError, which is the point: the flag cannot silently redefine an R2.
     shared_kwargs = dict(leaky_preds_path=leaky_preds_path, **trial_kwargs)
-    # The two routes differ in how the KF prediction file is selected: the session-type route picks
-    # each session's file generation with `sigma_r_files` (current `_sigma_r_{si_r}` vs legacy
-    # `_obs_noise_{..}`) and reads si_r per session, so that flag goes in `shared_kwargs` where
-    # figures 3/4/4b see it too; the single-session route has no such flag and is instead handed the
-    # cohort's one session and its fixed sigma_r, which only the four grid figures take. Hence the
-    # extras live in `grid_kwargs` and must NOT be repeated in `shared_kwargs` -- a key in both is a
-    # duplicate keyword argument and a TypeError at the first call.
+    # The session-type route reads si_r per session; the single-session route is given the
+    # cohort's one session and its sigma_r, which only the four grid figures take
     if SINGLE_SESSION:
         grid_kwargs = dict(corr=CORR, sess_num=SESS_NUM, sigma_r=SIGMA_R)
     else:
         grid_kwargs = dict(corr=CORR)
-        shared_kwargs['sigma_r_files'] = SIGMA_R_FILES
 
     # ---- The R2 table behind figures 3, 4 and 4b ------------------------------------------------
-    # Collected ONCE here, with the collector matching the cohort, then handed to all three figures
-    # via their `df=` argument -- previously each figure re-collected it, and each collected it with
-    # the 04/05/06-only `collect_perrun_models_R2`, which yields zero rows for 11/12/13.
+    # Computed once here, with the R2 function matching the cohort, then given to all three figures
+    # via their `df=` argument -- previously each figure recomputed it, and each computed it with
+    # the 04/05/06-only `get_perrun_models_R2`, which yields zero rows for 11/12/13.
     # Independent of CORR: every R2 here is the OLS one (Pearson rho**2 = the coefficient of
     # determination of the line the grids draw), so this table is the same whichever rho they report.
     if SINGLE_SESSION:
-        r2_df = collect_perrun_models_R2_single_session(
+        r2_df = get_perrun_models_R2_single_session(
             SUBJECTS, trials_path, preds_liks_path, logfiles_path, pi_rule, leaky_preds_path,
             sess_num=SESS_NUM, sigma_r=SIGMA_R, **trial_kwargs)
     else:
-        r2_df = collect_perrun_models_R2(
+        r2_df = get_perrun_models_R2(
             SUBJECTS, trials_path, preds_liks_path, logfiles_path, pi_rule, leaky_preds_path,
-            sigma_r_files=SIGMA_R_FILES, **trial_kwargs)
+            **trial_kwargs)
 
     # Each figure exists in a session-type form and a single-session form; both take the same
     # `common_args`/`shared_kwargs` and differ only by `grid_kwargs` above.

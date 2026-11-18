@@ -5,21 +5,21 @@ likelihoods, as a function of the within-trial position d (0..7). All three are 
 already condition on "no deviant has occurred yet" (S_{<d}), which is why they rise to 1 at the
 last position a rule allows.
 
-  row 0        global prior     `prior_dpos_given_prev_stds(d, p_no_dev)`
+  row 0        global prior     `prior_tone_is_dev_given_prev_stds(d, p_no_dev)`
                                 MARGINALIZES OVER the rules rather than ignoring them: the deviant
                                 is uniform over the pooled MULTISET of slots {2,3,4} U {4,5,6} =
                                 {2,3,4,4,5,6}, so position 4 -- owned by both rules -- carries
                                 double weight. What it is blind to is the rules' DYNAMICS (no
                                 transition matrix, no previous rule) and which rule owns which
                                 slot. Since rule structure is represented, a null rule must be too:
-                                `p_no_dev` (from `null_rule_marginal(pi_rule)`) reserves mass for
+                                `p_no_dev` (from `prob_null_trial(pi_rule)`) reserves mass for
                                 no-deviant trials, so the last slot never reaches certainty.
 
-  rows 1..N    rule-aware prior `pior_dpos_given_prev_rule_and_stds(d, pi_rule, r_prev)`
+  rows 1..N    rule-aware prior `prior_tone_is_dev_given_prev_rule_and_prev_stds(d, pi_rule, r_prev)`
                                 One row per PREVIOUS rule (the rows of `pi_rule`), since the prior
                                 is a transition-weighted mixture over the current rule.
 
-  rows 1..N    cue-aware prior  `pior_dpos_given_prev_rule_cue_and_stds(d, pi_rule, r_prev, cue)`
+  rows 1..N    cue-aware prior  `prior_tone_is_dev_given_prev_rule_cue_and_prev_stds(d, pi_rule, r_prev, cue)`
                (optional)       REPLACES the row above when `cue_rule_lik` is passed: the rule
                                 weights become the cue-informed posterior (transition prior x cue
                                 likelihood, renormalized). Cues are drawn as grouped bars inside
@@ -46,18 +46,20 @@ WORKSPACE = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
 sys.path.insert(0, os.path.join(WORKSPACE, 'PreProParadigm'))
 
 from model_RTs import (
-    DEFAULT_CUE_RULE_LIK,
     get_valid_positions_per_rule,
-    null_rule_marginal,
-    pior_dpos_given_prev_rule_and_stds,
-    pior_dpos_given_prev_rule_cue_and_stds,
-    prior_dpos_given_prev_stds,
+    prob_null_trial,
+    )
+
+from models.baseline_models import (
+    prior_tone_is_dev_given_prev_rule_and_prev_stds,
+    prior_tone_is_dev_given_prev_rule_cue_and_prev_stds,
+    prior_tone_is_dev_given_prev_stds,
 )
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 OUT = os.path.join(HERE, 'prior_viz')
 
-N_POSITIONS = 8  # within-trial timesteps 0..7, as keyed by prior_dpos_given_prev_stds
+N_POSITIONS = 8  # within-trial timesteps 0..7, as keyed by prior_tone_is_dev_given_prev_stds
 
 # Every panel plots the same quantity against the same positions, so the axis labels belong to the
 # figure rather than to any one panel (fig.supxlabel/supylabel).
@@ -129,7 +131,7 @@ def _bars(ax, x, y, color, width, label=None, fontsize=LABEL_FS, frac_labels=Fal
     Zero-height bars are labelled too ("0."), so a flat position reads as a hard zero rather
     than as missing data -- including position 7, which no rule owns and which therefore carries
     zero deviant mass exactly as positions 0 and 1 do. Should a prior ever come back UNDEFINED
-    (`model_RTs._hazard_without_rule_posterior`: a degenerate pi_rule that excludes every rule
+    (`baseline_models.prior_tone_is_dev_given_rule_belief_and_prev_stds`: a degenerate pi_rule that excludes every rule
     able to reach d), it is marked 'n/a' in grey rather than drawn as a zero.
     """
     ax.bar(x, y, width=width, color=color, label=label, zorder=3)
@@ -206,9 +208,9 @@ def plot_deviant_priors(pi_rule, cue_rule_lik=None, valid_positions=None, prev_r
     # Row 0: the global prior. Single series -> no legend, the panel title names it.
     # It marginalizes OVER the rules, so a null rule in pi_rule must be represented here too:
     # with one, surviving to the last slot no longer makes a deviant certain.
-    p_no_dev = null_rule_marginal(pi_rule, valid_positions)
+    p_no_dev = prob_null_trial(pi_rule, valid_positions)
     _bars(axs[0], positions,
-          [prior_dpos_given_prev_stds(d, p_no_dev=p_no_dev) for d in positions],
+          [prior_tone_is_dev_given_prev_stds(d, p_no_dev=p_no_dev) for d in positions],
           SERIES[0], width=GROUP_WIDTH, frac_labels=frac_labels)
     axs[0].set_title("Global prior",
                     #  + (f"   P(no-deviant trial)={p_no_dev:.3f}" if p_no_dev else ""),
@@ -220,10 +222,10 @@ def plot_deviant_priors(pi_rule, cue_rule_lik=None, valid_positions=None, prev_r
     for ax, r_prev in zip(axs[1:], prev_rules):
         for k, (cue, color) in enumerate(zip(cues, SERIES[1:])):
             if cue is None:
-                y = [pior_dpos_given_prev_rule_and_stds(d, pi_rule, r_prev, valid_positions)
+                y = [prior_tone_is_dev_given_prev_rule_and_prev_stds(d, pi_rule, r_prev, valid_positions)
                      for d in positions]
             else:
-                y = [pior_dpos_given_prev_rule_cue_and_stds(d, pi_rule, r_prev, cue,
+                y = [prior_tone_is_dev_given_prev_rule_cue_and_prev_stds(d, pi_rule, r_prev, cue,
                                                             cue_rule_lik, valid_positions)
                      for d in positions]
             # Offsets centre the group on the tick; bars within a group touch, so the only gaps

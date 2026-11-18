@@ -49,7 +49,7 @@ sys.path.insert(0, WORKSPACE)
 sys.path.insert(0, os.path.join(WORKSPACE, 'PreProParadigm'))
 
 from model_RTs import compute_likelihoods_at_deviants, _sigma_r_suffix
-from compute_leaky_int_benchmarks import compute_leaky_benchmarks_at_deviants
+from BehavModeling.scripts_data_modeling.compute_leaky_predictions import compute_leaky_benchmarks_at_deviants
 
 # --- Paths (this cohort is kept self-contained under BehavModeling) ---
 HERE = os.path.dirname(os.path.abspath(__file__))
