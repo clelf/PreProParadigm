@@ -104,9 +104,9 @@ class AuditGenerativeModel:
         if "tones_values" in params.keys():
             self.tones_values = params["tones_values"]
         if "mu_tau" in params.keys():
-            self.mu_tau = params["mu_tau"]  # Std and dvt process
-        self.si_tau = params["si_tau"]  # Std and dvt process
-        self.si_lim = params["si_lim"]  # Std and dvt process
+            self.mu_tau = params["mu_tau"]  # Std and dev process
+        self.si_tau = params["si_tau"]  # Std and dev process
+        self.si_lim = params["si_lim"]  # Std and dev process
         # self.si_q = params["si_q"] # Obsolete
         if "si_stat" in params.keys():
             self.si_stat = params["si_stat"]
@@ -114,19 +114,13 @@ class AuditGenerativeModel:
             self.si_r = params["si_r"]
 
         # Context parameters
-        if "N_ctx" not in params.keys(): self.N_ctx = 2 # context refers to being a std / dvt
+        if "N_ctx" not in params.keys(): self.N_ctx = 2 # context refers to being a std / dev
         else: self.N_ctx = params["N_ctx"]
 
-        # Couple the two process timescales (HierarchicalGM std/dev, i.e. N_ctx == 2):
-        # when True, tau is sampled once as the (faster) deviant timescale and the
-        # standard timescale is set to N_tones * tau_dev, i.e. tau_dev = tau_std / N_tones.
-        # This matches how the experimental sequences are generated. When False (or when
-        # N_ctx != 2) the previous behaviour is kept (both timescales equal in
-        # params_testing, or sampled independently otherwise). Default False so that
-        # callers that don't opt in are unaffected; the HierarchicalGM config passes True.
+        # Depedency between standard and deviant tau values (applies when N_ctx==2, defaults to True in HGM)
         self.tau_std_dev_dependency = params.get("tau_std_dev_dependency", False)
 
-        # In case of 2 contexts (std and dvt), define stationary values for both processes
+        # In case of 2 contexts (std and dev), define stationary values for both processes
         if "si_d_coef" in params.keys() and "mu_d" in params.keys() and "d_bounds" in params.keys():
             self.mu_d = params["mu_d"]
             si_d_ub = (params["d_bounds"]["high"] - self.mu_d)/3     # we want most of d (i.e. 3*si_d) to be <= 4
@@ -392,9 +386,9 @@ class AuditGenerativeModel:
         return evts
 
     def sample_states(self, contexts, return_pars=False):
-        """Generates a dictionary of data sequence for each context (std or dvt) dynamics given a sequence of contexts
+        """Generates a dictionary of data sequence for each context (std or dev) dynamics given a sequence of contexts
 
-        Here contexts is the sequence of tone-by-tone boolean value standing for {std: 0, dvt: 1} that has been
+        Here contexts is the sequence of tone-by-tone boolean value standing for {std: 0, dev: 1} that has been
         hierarchically defined prior to the call of sample_states
 
         Parameter sampling strategy:
@@ -402,7 +396,7 @@ class AuditGenerativeModel:
         - lim is sampled per block.
 
         Processes dynamics:
-        - states[1] (dvt) is updated at every block, and follows the same across the entire block
+        - states[1] (dev) is updated at every block, and follows the same across the entire block
         - states[0] (std) is updated at every timestep.
 
 
@@ -445,7 +439,7 @@ class AuditGenerativeModel:
                     tau = np.array([tau_dev * self.N_tones, tau_dev]) # [tau_std, tau_dev]
                 else:
                     tau = self._sample_logN_(min=1, mu=self.mu_tau, si=self.si_tau, size=self.N_ctx) # size = (N_ctx,)
-                si_stat = self._sample_logN_(min=0, mu=self.si_stat, si=0.2).item() # std and dvt share the same stationary variance
+                si_stat = self._sample_logN_(min=0, mu=self.si_stat, si=0.2).item() # std and dev share the same stationary variance
 
         elif self.fix_process:
             tau = np.array(self.fix_tau_val)
@@ -531,8 +525,8 @@ class AuditGenerativeModel:
 
             for b in range(1,self.N_blocks):
                 # LGD update at block level: x[b] = x[b-1] + 1/tau * (lim - x[b-1]) + noise
-                w_dvt = self._sample_N_(0, si_q[1], size=1)
-                states[1][b, :] = states[1][b - 1, :] + 1 / tau[1] * (lim[1] - states[1][b - 1, :]) + w_dvt
+                w_dev = self._sample_N_(0, si_q[1], size=1)
+                states[1][b, :] = states[1][b - 1, :] + 1 / tau[1] * (lim[1] - states[1][b - 1, :]) + w_dev
                 
 
         if return_pars:
@@ -548,9 +542,9 @@ class AuditGenerativeModel:
             return states
 
     def sample_states_corr(self, contexts, return_pars=False):
-        """Generates a dictionary of data sequence for each context (std or dvt) dynamics given a sequence of contexts
+        """Generates a dictionary of data sequence for each context (std or dev) dynamics given a sequence of contexts
 
-        Here contexts is the sequence of tone-by-tone boolean value standing for {std: 0, dvt: 1} that has been
+        Here contexts is the sequence of tone-by-tone boolean value standing for {std: 0, dev: 1} that has been
         hierarchically defined prior to the call of sample_states
 
         Parameter sampling strategy:
@@ -558,7 +552,7 @@ class AuditGenerativeModel:
         - lim is sampled per block.
 
         Processes dynamics:
-        - states[1] (dvt) is updated at every block, and follows the same across the entire block
+        - states[1] (dev) is updated at every block, and follows the same across the entire block
         - states[0] (std) is updated at every timestep.
 
 
@@ -601,7 +595,7 @@ class AuditGenerativeModel:
                     tau = np.array([tau_dev * self.N_tones, tau_dev]) # [tau_std, tau_dev]
                 else:
                     tau = self._sample_logN_(min=1, mu=self.mu_tau, si=self.si_tau, size=self.N_ctx) # size = (N_ctx,)
-                si_stat = self._sample_logN_(min=0, mu=self.si_stat, si=0.2).item() # std and dvt share the same stationary variance
+                si_stat = self._sample_logN_(min=0, mu=self.si_stat, si=0.2).item() # std and dev share the same stationary variance
 
         elif self.fix_process:
             tau = np.array(self.fix_tau_val)
@@ -687,8 +681,8 @@ class AuditGenerativeModel:
 
             for b in range(1,self.N_blocks):
                 # LGD update at block level: x[b] = x[b-1] + 1/tau * (lim - x[b-1]) + noise
-                w_dvt = self._sample_N_(0, si_q[1], size=1)
-                states[1][b, :] = states[1][b - 1, :] + 1 / tau[1] * (lim[1] - states[1][b - 1, :]) + w_dvt
+                w_dev = self._sample_N_(0, si_q[1], size=1)
+                states[1][b, :] = states[1][b - 1, :] + 1 / tau[1] * (lim[1] - states[1][b - 1, :]) + w_dev
                 
 
         if return_pars:
@@ -711,7 +705,7 @@ class AuditGenerativeModel:
         Parameters
         ----------
         contexts : integer np.array
-            2-dimensional sequence of contexts filled with 0 or 1 (std or dvt), of size (N_blocks, N_tones)
+            2-dimensional sequence of contexts filled with 0 or 1 (std or dev), of size (N_blocks, N_tones)
         states : dict
             dictionary encoding the hidden state values (one-dimensional np.array) for each
             context c (keys).
@@ -738,8 +732,8 @@ class AuditGenerativeModel:
         
         return obs
 
-    def plot_contexts_states_obs(self, Cs, ys, x_stds, x_dvts, T, pars, figsize=(10, 6), plot_obs=False):
-        """For a non-hierarchical situation (only contexts std/dvt, no rules)
+    def plot_contexts_states_obs(self, Cs, ys, x_stds, x_devs, T, pars, figsize=(10, 6), plot_obs=False):
+        """For a non-hierarchical situation (only contexts std/dev, no rules)
 
         Parameters
         ----------
@@ -749,13 +743,13 @@ class AuditGenerativeModel:
             observations
         x_stds : _type_
             states of std
-        x_dvts : _type_
-            states of dvt
+        x_devs : _type_
+            states of dev
         """
 
         fig, ax1 = plt.subplots(figsize=figsize)
         ax1.plot(x_stds, label="x_std", color="blue", linestyle="-", linewidth=2)
-        ax1.plot(x_dvts, label="x_dvt", color="red", linestyle="-", linewidth=2)
+        ax1.plot(x_devs, label="x_dev", color="red", linestyle="-", linewidth=2)
         if plot_obs:
             ax1.plot(ys, label="y", color="green", linestyle="-", linewidth=2)
         ax1.set_ylabel("y")
@@ -763,11 +757,11 @@ class AuditGenerativeModel:
         ax2 = ax1.twinx()
         ax2.plot(range(T), Cs, "o", color="black", label="context")
         ax2.set_ylabel("context")
-        ax2.set_yticks(ticks=[0, 1], labels=["std", "dvt"])
+        ax2.set_yticks(ticks=[0, 1], labels=["std", "dev"])
 
-        # Plot horizontal lines for lim_std and lim_dvt
+        # Plot horizontal lines for lim_std and lim_dev
         ax1.hlines(pars['lim'][0], xmin=0, xmax=len(x_stds)-1, color="blue", linestyle="--", alpha=0.5, label="lim_std")
-        ax1.hlines(pars['lim'][1], xmin=0, xmax=len(x_dvts)-1, color="red", linestyle="--", alpha=0.5, label="lim_dvt")
+        ax1.hlines(pars['lim'][1], xmin=0, xmax=len(x_devs)-1, color="red", linestyle="--", alpha=0.5, label="lim_dev")
 
         # Fill margin between lim ± si_stat for both processes
         ax1.fill_between(
@@ -779,12 +773,12 @@ class AuditGenerativeModel:
             label="lim_std ± si_stat"
         )
         ax1.fill_between(
-            range(len(x_dvts)),
+            range(len(x_devs)),
             pars['lim'][1] - pars['si_stat'],
             pars['lim'][1] + pars['si_stat'],
             color="red",
             alpha=0.2,
-            label="lim_dvt ± si_stat"
+            label="lim_dev ± si_stat"
         )
 
         ax1.legend(bbox_to_anchor=(1.1, 1))
@@ -944,9 +938,9 @@ class NonHierarchicalAuditGM(AuditGenerativeModel):
         Returns
         -------
         contexts:
-            List of whether a tone is considered a dvt or a std --> contexts[t] = (current tone == dvt) (length = N_tones*N_blocks)
+            List of whether a tone is considered a dev or a std --> contexts[t] = (current tone == dev) (length = N_tones*N_blocks)
         states:
-            List ynamics of both std (states[0]) and dvt (states[1]) at each "time step" (length = N_tones*N_blocks)
+            List ynamics of both std (states[0]) and dev (states[1]) at each "time step" (length = N_tones*N_blocks)
         obs:
             Observed tone at each time step (length = N_tones*N_blocks)
         pars: optional
@@ -955,7 +949,7 @@ class NonHierarchicalAuditGM(AuditGenerativeModel):
         # Sample transition matrix between contexts from a parametric distribution
         pi_ctx = self.sample_pi(self.N_ctx, mu_rho=self.mu_rho_ctx, si_rho=self.si_rho_ctx)
 
-        # Get std/dvt contexts
+        # Get std/dev contexts
         contexts = self.sample_events(
             N_evt=self.N_tones, N_val=self.N_ctx, pi_evt=pi_ctx
         )
@@ -1351,7 +1345,7 @@ class HierarchicalAuditGM(AuditGenerativeModel):
         return_pars = False,
         return_pi_rules = False
     ):
-        """Generate data for one run of experiment: rules, dvt positions, timbres, contexts (std or dvt),
+        """Generate data for one run of experiment: rules, dev positions, timbres, contexts (std or dev),
         states (hidden states dynamics), observations
 
         Returns
@@ -1361,15 +1355,15 @@ class HierarchicalAuditGM(AuditGenerativeModel):
         rules_long:
             List of rules that apply to each tone in the whole list of tones --> rules_long[t] is the same for every 8 consecutive t (length = N_tones*N_blocks)
         dpos:
-            Positions of the dvt within each block (length = N_blocks)
+            Positions of the dev within each block (length = N_blocks)
         timbres:
             List of timbres associated with each block (NOTE: dynamics correct but physical values TBD, not implemented ATM) (length = N_blocks)
         timbres_long:
             Same as in rules_long, per tone list of timbres (length = N_tones*N_blocks)
         contexts:
-            List of whether a tone is considered a dvt or a std --> contexts[t] = (current tone == dvt) (length = N_tones*N_blocks)
+            List of whether a tone is considered a dev or a std --> contexts[t] = (current tone == dev) (length = N_tones*N_blocks)
         states:
-            List of the dynamics of both std (states[0]) and dvt (states[1]) at each "time step" (length = N_tones*N_blocks)
+            List of the dynamics of both std (states[0]) and dev (states[1]) at each "time step" (length = N_tones*N_blocks)
         obs:
             Observed tone at each time step (length = N_tones*N_blocks)
         pars: optional
@@ -1462,14 +1456,14 @@ class HierarchicalAuditGM(AuditGenerativeModel):
 
         return run_obj
 
-    def plot_contexts_rules_states_obs(self, x_stds, x_dvts, ys, Cs, rules, dpos, pars, text=True):
+    def plot_contexts_rules_states_obs(self, x_stds, x_devs, ys, Cs, rules, dpos, pars, text=True):
         """For the hierachical evolution of rules and contexts (NOTE: timbres not included in this viz atm)
 
         Parameters
         ----------
         x_stds : _type_
             _description_
-        x_dvts : _type_
+        x_devs : _type_
             _description_
         ys : _type_
             _description_
@@ -1484,7 +1478,7 @@ class HierarchicalAuditGM(AuditGenerativeModel):
         # Visualize tone frequencies
         fig, ax1 = plt.subplots(figsize=(20, 6))
         ax1.set_xlim(0, len(x_stds)-1)
-        ax1.set_ylim(min(np.min(x_stds), np.min(x_dvts), np.min(ys)) - 0.5, max(np.max(x_stds), np.max(x_dvts), np.max(ys)) + 0.5)
+        ax1.set_ylim(min(np.min(x_stds), np.min(x_devs), np.min(ys)) - 0.5, max(np.max(x_stds), np.max(x_devs), np.max(ys)) + 0.5)
         ax1.plot(
             x_stds,
             label="x_std",
@@ -1496,8 +1490,8 @@ class HierarchicalAuditGM(AuditGenerativeModel):
             alpha=0.9,
         )
         ax1.plot(
-            x_dvts,
-            label="x_dvt",
+            x_devs,
+            label="x_dev",
             color="red",
             marker="o" if text else None,
             markersize=4,
@@ -1521,7 +1515,7 @@ class HierarchicalAuditGM(AuditGenerativeModel):
             ax2.plot(Cs, "o", color="black", label="context", markersize=2)
             ax2.set_ylabel("context")
             ax2.yaxis.set_major_locator(MaxNLocator(integer=True))
-            ax2.set_yticks(ticks=[0, 1], labels=["std", "dvt"])
+            ax2.set_yticks(ticks=[0, 1], labels=["std", "dev"])
 
         for i, rule in enumerate(rules):
             ax1.axvspan(
@@ -1548,7 +1542,7 @@ class HierarchicalAuditGM(AuditGenerativeModel):
                 ax2.text(
                     x=i * self.N_tones + 0.35 * self.N_tones,
                     y=text_y_position - 0.075,
-                    s=f"dvt {dpos[i]}",
+                    s=f"dev {dpos[i]}",
                     color=self.rules_cmap[rules[i]],
                     transform=ax2.transData,
                     ha="center",
@@ -1557,7 +1551,7 @@ class HierarchicalAuditGM(AuditGenerativeModel):
             ax1.set_xticks(np.arange(0, self.N_blocks * self.N_tones + 1, 50))
 
         ax1.hlines(pars['lim'][0], xmin=0, xmax=len(x_stds)-1, color="blue", linestyle="--", linewidth=2, alpha=0.5, label="lim_std")
-        ax1.hlines(pars['lim'][1], xmin=0, xmax=len(x_dvts)-1, color="red", linestyle="--", linewidth=2,alpha=0.5, label="lim_dvt")
+        ax1.hlines(pars['lim'][1], xmin=0, xmax=len(x_devs)-1, color="red", linestyle="--", linewidth=2,alpha=0.5, label="lim_dev")
 
         ax1.fill_between(
             range(len(x_stds)),
@@ -1568,16 +1562,16 @@ class HierarchicalAuditGM(AuditGenerativeModel):
             label="lim_std ± si_stat"
         )
         ax1.fill_between(
-            range(len(x_dvts)),
+            range(len(x_devs)),
             pars['lim'][1] - pars['si_stat'],
             pars['lim'][1] + pars['si_stat'],
             color="red",
             alpha=0.2,
-            label="lim_dvt ± si_stat"
+            label="lim_dev ± si_stat"
         )
 
-        tau_str = f"std: {pars['tau'][0]:.2f}, dvt: {pars['tau'][1]:.2f}" if self.N_ctx == 2 else f"{pars['tau']:.2f}"
-        si_q_str = f"std: {pars['si_q'][0]:.2f}, dvt: {pars['si_q'][1]:.2f}" if self.N_ctx == 2 else f"{pars['si_q']:.2f}"
+        tau_str = f"std: {pars['tau'][0]:.2f}, dev: {pars['tau'][1]:.2f}" if self.N_ctx == 2 else f"{pars['tau']:.2f}"
+        si_q_str = f"std: {pars['si_q'][0]:.2f}, dev: {pars['si_q'][1]:.2f}" if self.N_ctx == 2 else f"{pars['si_q']:.2f}"
 
         title_line1 = f"tau: {tau_str}  |  si_stat: {pars['si_stat']:.2f}  |  si_q: {si_q_str}"
         title_line2 = f"(mu_tau: {self.mu_tau:.2f}, mu_si_stat: {self.si_stat:.2f}, mu_si_q: {self.si_stat * ((2 * self.mu_tau - 1) ** 0.5) / self.mu_tau:.2f}, si_r: {self.si_r:.2f})"
@@ -1588,7 +1582,7 @@ class HierarchicalAuditGM(AuditGenerativeModel):
         #plt.show()
 
 
-    def plot_combined_with_matrix(self, x_stds, x_dvts, ys, Cs, rules, dpos, pars, pi_rules=None, text=True, plot_obs=False, plot_dpos_dist=False, save_path=None, title=None):
+    def plot_combined_with_matrix(self, x_stds, x_devs, ys, Cs, rules, dpos, pars, pi_rules=None, text=True, plot_obs=False, plot_dpos_dist=False, save_path=None, title=None):
         """
         Plots plot_contexts_rules_states_obs and plot_rules_dpos as subplots, and pi_rules as a matrix on the side.
         Includes histograms with KDE of dpos distribution to the right of the dpos plot.
@@ -1616,9 +1610,9 @@ class HierarchicalAuditGM(AuditGenerativeModel):
 
         # Top subplot: contexts, rules, states, obs
         ax1.set_xlim(0, len(x_stds)-1)
-        # ax1.set_ylim(min(np.min(x_stds), np.min(x_dvts), np.min(ys)) - 0.5, max(np.max(x_stds), np.max(x_dvts), np.max(ys)) + 0.5)
+        # ax1.set_ylim(min(np.min(x_stds), np.min(x_devs), np.min(ys)) - 0.5, max(np.max(x_stds), np.max(x_devs), np.max(ys)) + 0.5)
         ax1.plot(x_stds, label="standard", color="tab:blue", linestyle="-", linewidth=2, alpha=0.8) # label="x_std"
-        ax1.plot(x_dvts, label="deviant", color="tab:red", linestyle="-", linewidth=2, alpha=0.8) # label="x_dvt"
+        ax1.plot(x_devs, label="deviant", color="tab:red", linestyle="-", linewidth=2, alpha=0.8) # label="x_dev"
         if plot_obs:
             ax1.plot(ys, linestyle='--', label="obs", color="tab:green", linewidth=2, alpha=0.9) # label="y"
         ax1.set_ylabel(f"states {'and observations' if plot_obs else ''}")
@@ -1627,7 +1621,7 @@ class HierarchicalAuditGM(AuditGenerativeModel):
             ax2.plot(Cs, "o", color="black", label="context", markersize=2)
             ax2.set_ylabel("context")
             ax2.yaxis.set_major_locator(MaxNLocator(integer=True))
-            ax2.set_yticks(ticks=[0, 1], labels=["std", "dvt"])
+            ax2.set_yticks(ticks=[0, 1], labels=["std", "dev"])
         for i, rule in enumerate(rules):
             ax1.axvspan(i * self.N_tones, i * self.N_tones + self.N_tones, facecolor=self.rules_cmap[rule], alpha=0.25)
         for i in range(self.N_blocks):
@@ -1636,13 +1630,13 @@ class HierarchicalAuditGM(AuditGenerativeModel):
             text_y_position = 1.15
             for i in range(self.N_blocks):
                 ax2.text(x=i * self.N_tones + 0.35 * self.N_tones, y=text_y_position, s=f"rule {rules.reset_index(drop=True)[i]}", color=self.rules_cmap[rules.reset_index(drop=True)[i]], transform=ax2.transData, ha="center")
-                ax2.text(x=i * self.N_tones + 0.35 * self.N_tones, y=text_y_position - 0.075, s=f"dvt {dpos.reset_index(drop=True)[i]}", color=self.rules_cmap[rules.reset_index(drop=True)[i]], transform=ax2.transData, ha="center")
+                ax2.text(x=i * self.N_tones + 0.35 * self.N_tones, y=text_y_position - 0.075, s=f"dev {dpos.reset_index(drop=True)[i]}", color=self.rules_cmap[rules.reset_index(drop=True)[i]], transform=ax2.transData, ha="center")
         else:
             ax1.set_xticks(np.arange(0, self.N_blocks * self.N_tones + 1, 50))
         ax1.hlines(pars['lim'][0], xmin=0, xmax=len(x_stds)-1, color="tab:blue", linestyle="--", linewidth=2, alpha=0.5) #  label="lim_std"
-        ax1.hlines(pars['lim'][1], xmin=0, xmax=len(x_dvts)-1, color="tab:red", linestyle="--", linewidth=2,alpha=0.5) #  label="lim_dvt"
+        ax1.hlines(pars['lim'][1], xmin=0, xmax=len(x_devs)-1, color="tab:red", linestyle="--", linewidth=2,alpha=0.5) #  label="lim_dev"
         ax1.fill_between(range(len(x_stds)), pars['lim'][0] - pars['si_stat'], pars['lim'][0] + pars['si_stat'], color="tab:blue", alpha=0.2) # label="lim_std ± si_stat"
-        ax1.fill_between(range(len(x_dvts)), pars['lim'][1] - pars['si_stat'], pars['lim'][1] + pars['si_stat'], color="tab:red", alpha=0.2) # label="lim_dvt ± si_stat"
+        ax1.fill_between(range(len(x_devs)), pars['lim'][1] - pars['si_stat'], pars['lim'][1] + pars['si_stat'], color="tab:red", alpha=0.2) # label="lim_dev ± si_stat"
         # ax1.legend(bbox_to_anchor=(1.0, 1))
         ax1.legend(loc='lower left')
         ax1.spines['top'].set_visible(False)
@@ -1734,15 +1728,15 @@ class HierarchicalAuditGM(AuditGenerativeModel):
                     ax4.text(j, i, f"{pi_rules[i, j]:.2f}", ha="center", va="center", color="black")
 
         # Set figure title
-        tau_str = f"std: {pars['tau'][0]:.2f}, dvt: {pars['tau'][1]:.2f}" if self.N_ctx == 2 else f"{pars['tau']:.2f}"
-        si_q_str = f"std: {pars['si_q'][0]:.2f}, dvt: {pars['si_q'][1]:.2f}" if self.N_ctx == 2 else f"{pars['si_q']:.2f}"
+        tau_str = f"std: {pars['tau'][0]:.2f}, dev: {pars['tau'][1]:.2f}" if self.N_ctx == 2 else f"{pars['tau']:.2f}"
+        si_q_str = f"std: {pars['si_q'][0]:.2f}, dev: {pars['si_q'][1]:.2f}" if self.N_ctx == 2 else f"{pars['si_q']:.2f}"
         title_line1 = f"tau: {tau_str}  |  si_stat: {pars['si_stat']:.2f}  |  si_q: {si_q_str}"
         title_line2 = f"(mu_tau: {self.mu_tau:.2f}, mu_si_stat: {self.si_stat:.2f}, mu_si_q: {self.si_stat * ((2 * self.mu_tau - 1) ** 0.5) / self.mu_tau:.2f}, si_r: {self.si_r:.2f})"
         # fig.suptitle(f"{title_line1}\n{title_line2}", fontsize=12)
 
 
         # Alt title: $x_{\text{c}} = $
-        equations =  r"$x_{t+1}^{c} = x_{t}^{c}+\frac{1}{\tau^{c}}(\mu^{c}-x_{t}^{c})+\sigma_{q}\epsilon_{t}^{c}$ (c = std, dvt)" \
+        equations =  r"$x_{t+1}^{c} = x_{t}^{c}+\frac{1}{\tau^{c}}(\mu^{c}-x_{t}^{c})+\sigma_{q}\epsilon_{t}^{c}$ (c = std, dev)" \
             + '\n' + r'$y_{t+1} = x_{t+1}^{c_{t}}+\sigma_{r}\nu_{t}$'
 
         plt.tight_layout(rect=[0, 0, 1, 0.95])
@@ -1756,7 +1750,7 @@ class HierarchicalAuditGM(AuditGenerativeModel):
         # TODO: sort blank space around plot within rectangle
 
 
-        # Visualize hierarchical information: dvt pos and rule
+        # Visualize hierarchical information: dev pos and rule
         fig, ax = plt.subplots(figsize=(20, 6))
         for i, y in enumerate(dpos):
             ax.vlines(
@@ -1771,7 +1765,7 @@ class HierarchicalAuditGM(AuditGenerativeModel):
         ax.scatter(
             range(len(dpos)), dpos, c=[self.rules_cmap[rule] for rule in rules], zorder=2
         )
-        ax.set_ylabel("dvt pos")
+        ax.set_ylabel("dev pos")
         ax.set_xlabel("trial")
         ax.set_ylim(1, 8)
         ax.yaxis.set_major_locator(MaxNLocator(integer=True))
@@ -1790,8 +1784,8 @@ class HierarchicalAuditGM(AuditGenerativeModel):
             # Set x ticks every 50 tones if too many tones
             ax.set_xticks(np.arange(0, self.N_blocks + 1, 50))
 
-        tau_str = f"std: {pars['tau'][0]:.2f}, dvt: {pars['tau'][1]:.2f}" if self.N_ctx == 2 else f"{pars['tau']:.2f}"
-        si_q_str = f"std: {pars['si_q'][0]:.2f}, dvt: {pars['si_q'][1]:.2f}" if self.N_ctx == 2 else f"{pars['si_q']:.2f}"
+        tau_str = f"std: {pars['tau'][0]:.2f}, dev: {pars['tau'][1]:.2f}" if self.N_ctx == 2 else f"{pars['tau']:.2f}"
+        si_q_str = f"std: {pars['si_q'][0]:.2f}, dev: {pars['si_q'][1]:.2f}" if self.N_ctx == 2 else f"{pars['si_q']:.2f}"
         title_line1 = f"tau: {tau_str}; si_stat: {pars['si_stat']:.2f}; si_q: {si_q_str}"
         title_line2 = f"(mu_tau: {self.mu_tau:.2f}, mu_si_stat: {self.si_stat:.2f}, mu_si_q: {self.si_stat * ((2 * self.mu_tau - 1) ** 0.5) / self.mu_tau:.2f}, si_r: {self.si_r:.2f})"
         plt.title(f"{title_line1}\n{title_line2}", y=-0.2)
@@ -1868,7 +1862,7 @@ def example_single(config_single):
 
 if __name__ == "__main__":
 
-    # Example hierachical GM (rules, timbres [not implemented], std/dvt)
+    # Example hierachical GM (rules, timbres [not implemented], std/dev)
     config_H = {
         "N_samples": 1,
         "N_blocks": 120, # TODO: adapt here!
@@ -1908,7 +1902,7 @@ if __name__ == "__main__":
     config_H_nullrule["rules_cmap"] = {0: "tab:blue", 1: "tab:red", 2: "tab:gray"}
     example_HGM(config_H_nullrule, plot_obs=True, plot_dpos_dist=True)
     
-    # Example non-hierachical GM (no rules, std/dvt)
+    # Example non-hierachical GM (no rules, std/dev)
     config_NH = {
         "N_samples": 1,
         "N_blocks": 1,

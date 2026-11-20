@@ -107,11 +107,6 @@ if __name__ == "__main__":
     #                 non-positive likelihoods LOGLIK drops), so it reads a run's RT-vs-likelihood
     #                 ordering without assuming the relation is a straight line. Figures are named
     #                 '..._spearman.png', so both versions coexist in the output.
-    # It does NOT reach any R2. R2 is a property of the OLS fit -- squaring a rank correlation gives
-    # the R2 of a fit on RANKS, a different quantity -- so the R2 table below and figures 3/4/4b are
-    # always Pearson/OLS, and the regression lines and CIs drawn on 1/2/2b/5 are OLS either way.
-    # Consequence: switching CORR redraws 1/2/2b/5 only; 3/4/4b come out identical (and with the
-    # same filename), which is why they are not handed this flag.
     CORR = 'spearman'
     # Uniform size multiplier for the two Cohen's d figures (4 and 4b). Font sizes are set in POINTS
     # and do NOT follow it, so raising this enlarges the figure at constant text size -- which is
@@ -204,9 +199,9 @@ if __name__ == "__main__":
                      else compare_likelihoods_with_RTs_per_run_models)
     persubject_models = (compare_likelihoods_with_RTs_per_subject_models_single_session
                          if SINGLE_SESSION else compare_likelihoods_with_RTs_per_subject_models)
-    persubject_runmeans = (compare_likelihoods_with_RTs_per_subject_runmeans_models_single_session
-                           if SINGLE_SESSION
-                           else compare_likelihoods_with_RTs_per_subject_runmeans_models)
+    # persubject_runmeans = (compare_likelihoods_with_RTs_per_subject_runmeans_models_single_session
+    #                        if SINGLE_SESSION
+    #                        else compare_likelihoods_with_RTs_per_subject_runmeans_models)
     perrun_and_subject = (compare_likelihoods_with_RTs_per_run_and_subject_models_single_session
                           if SINGLE_SESSION
                           else compare_likelihoods_with_RTs_per_run_and_subject_models)
@@ -219,12 +214,13 @@ if __name__ == "__main__":
     print("\n[2/5] Per-subject (pooled) x per-model RT-vs-likelihood grid ...")
     persubject_models(*common_args, **shared_kwargs, **grid_kwargs)
 
-    # ---- Figure 2b: per-subject x per-model, ONE run-mean dot per run (RT_perubjlinrel) ----------
+    # ---- Figure 2b: per-subject x per-model, ONE run-mean dot per run (RT_persubject_perrun_linrel) ----------
+    # DISCARDED: not meaningful
     # Same 8 x 3 layout as Figure 2, but each run is collapsed to one dot (mean likelihood, mean RT)
     # with SEM brackets on both axes, dots linked by a plain line (ascending likelihood) and fitted
     # by a dashed OLS trend + shaded CI -- so each subject column shows one dot per run (16 for
     # 04/05/06, 4 for 11/12/13), not every trial.
-    print("\n[2b/5] Per-subject x per-model run-mean RT-vs-likelihood grid (RT_perubjlinrel) ...")
+    # print("\n[2b/5] Per-subject x per-model run-mean RT-vs-likelihood grid (RT_persubject_perrun_linrel) ...")
     # persubject_runmeans(*common_args, **shared_kwargs, **grid_kwargs)
 
     # # ---- Figure 3: per-subject R2 violins --------------------------------------------------------

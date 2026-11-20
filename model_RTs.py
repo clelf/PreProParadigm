@@ -29,7 +29,7 @@ if os.path.exists(os.path.join(base_path, 'Kalman')):
     from Kalman.kalman_core import likelihood_observation, contexts_to_probabilities
 elif os.path.exists(os.path.join(base_path, 'KalmanFilterViz1D')):
     from KalmanFilterViz1D.kalman_fit_em import MIN_OBS_FOR_EM, kalman_online_fit_predict_multicontext
-    from Kalman.kalman_core import likelihood_observation, contexts_to_probabilities
+    from KalmanFilterViz1D.kalman_core import likelihood_observation, contexts_to_probabilities
 else:
     raise ImportError("Neither 'Kalman' nor 'KalmanFilterViz1D' folder found.")
 
@@ -46,15 +46,15 @@ def prepare_trials_data(trials_path, exclude_null=False):
     n_trials = len(trials)/8
     # If trial_no doesn't exist yet, create it; otherwise keep the loaded one
     if 'trial_no' not in trials.columns:
-        trials['trial_no'] = np.repeat(np.arange(int(n_trials)), 8) # 0 to n_trials-1 for each run
-    
-    trials['relative_pos'] = np.tile(np.arange(8), int(n_trials)) # 0 to 7 for each run, to match dpos indexing
+        trials['trial_no'] = np.repeat(np.arange(int(n_trials)), 8) # 0 to n_trials-1 over the whole file
+
+    trials['relative_pos'] = np.tile(np.arange(8), int(n_trials)) # position in the trial (0 to 7), as in dpos
     if exclude_null:
         trials = trials[trials['dpos'] != 0].reset_index(drop=True)
     trials['contexts'] = trials['relative_pos'] == trials['dpos'] # 0: standard, 1: deviant
-    # dpos = 0 is actually not a deviant but an omission, so convert it to standard
+    # dpos = 0 marks a trial without deviant (null rule): its position 0 must not be flagged as
+    # deviant
     if not exclude_null:
-        # if null rule trials have been kept, still flag their position as standard
         trials.loc[trials.dpos == 0, 'contexts'] = False # TODO: but was I even using the contexts column later on?
     return trials
 
@@ -62,7 +62,7 @@ def prepare_trials_data(trials_path, exclude_null=False):
 
 def _sigma_r_suffix(sigma_r):
     """Filename suffix of the KF prediction files computed at a fixed observation-noise std
-    `sigma_r` (empty when R is fitted by EM)."""
+    sigma_r (empty when R is fitted by EM)."""
     return "" if sigma_r is None else f"_sigma_r_{sigma_r}"
 
 
@@ -73,10 +73,10 @@ _KF_CTX_NAMES = ('std', 'dev')
 def _tau_from_A(A_stack):
     """Time constant tau implied by one context's fitted transition matrices, at every timestep.
 
-    `A_stack` has shape (T, 2, 2). The generative process is x[t] = a * x[t-1] + b with
+    A_stack has shape (T, 2, 2). The generative process is x[t] = a * x[t-1] + b with
     a = 1 - 1/tau, so tau = 1 / (1 - a). The fitted A is only defined up to a change of basis, so
-    `a` is read from its eigenvalues: one is ~1 (the state component carrying the constant `lim`),
-    the other is `a`.
+    a is read from its eigenvalues: one is ~1 (the state component carrying the constant lim),
+    the other is a.
 
     Returns an array of length T, NaN where tau is undefined (context not fitted yet, complex or
     non-decaying eigenvalue).
@@ -88,7 +88,7 @@ def _tau_from_A(A_stack):
 
     eigenvalues = np.linalg.eigvals(A_stack[usable]).astype(complex)  # (n_usable, 2)
 
-    # Keep the eigenvalue furthest from 1 (the one closest to 1 belongs to `lim`)
+    # Keep the eigenvalue furthest from 1 (the one closest to 1 belongs to lim)
     order = np.argsort(np.abs(eigenvalues - 1.0), axis=1)
     a = np.take_along_axis(eigenvalues, order[:, 1:2], axis=1)[:, 0]
 
@@ -103,7 +103,7 @@ def _kf_param_columns(kf_params):
     """Fitted KF parameters of every context (A, Q, H, R and the implied tau), as named columns
     of length T.
 
-    `kf_params` is the dict returned by kalman_online_fit_predict_multicontext(...,
+    kf_params is the dict returned by kalman_online_fit_predict_multicontext(...,
     return_params=True). Names carry the context and matrix entry, e.g. A_std_01, R_dev,
     tau_hat_std. R is a variance (compare it with sigma_r**2). Values are NaN before a context
     is first fitted.
@@ -128,12 +128,12 @@ def compute_likelihoods_at_deviants(trials_path, sub, sess, results_save_path=No
     """Run the multi-context KF on one session; save its predictions, and its predictions and
     likelihoods at the deviant positions.
 
-    The key output is `likelihood_obs_std_at_dev`, the likelihood of each deviant under the
+    The key output is likelihood_obs_std_at_dev, the likelihood of each deviant under the
     standard context's prediction. Writes two CSVs (all tones / deviant positions only) and
     returns the deviant-position DataFrame.
 
     sigma_r: fixed observation-noise std (the KF's R is its square); None lets EM fit R. Every
-        saved `sigma_*` column is a std.
+        saved sigma_* column is a std.
     """
     if results_save_path is None:
         results_save_path = os.path.dirname(__file__)
@@ -192,7 +192,7 @@ def compute_likelihoods_at_deviants(trials_path, sub, sess, results_save_path=No
         per_ctx_var_std = per_ctx_var[:, 0]
         per_ctx_var_dev = per_ctx_var[:, 1]
 
-        # Save predictions (every saved `sigma_*` column is a std)
+        # Save predictions (every saved sigma_* column is a std)
         results['run_id'].append(np.full(len(mu_pred), run_id))
         results['trial_no'].append(run['trial_no'])
         results['mu_pred'].append(mu_pred)
@@ -266,10 +266,11 @@ def compute_likelihoods_at_deviants(trials_path, sub, sess, results_save_path=No
 def compute_dev_likelihoods_over_dpos(trials_path, results_df, sub, sess, results_save_path=None,
                                       inplace=False, p_no_dev=0.0):
     """Add the global deviant-position prior to the deviant-position results, and the likelihood
-    weighted by it (`likelihood_obs_std_at_dev_over_dpos`).
+    weighted by it (likelihood_obs_std_at_dev_over_dpos).
 
-    The prior is the probability that a position holds a standard, given that the previous tones
-    of the trial were standards.
+    The prior is the probability that a position holds the deviant (prior_dpos_dev) or a standard
+    (prior_dpos_std), given that the previous tones of the trial were standards, without
+    knowledge of the rule. The likelihood is weighted by prior_dpos_std.
     p_no_dev: probability that a trial has no deviant: prob_null_trial(pi_rule) for cohorts
         with a null rule, 0.0 otherwise.
     """
@@ -300,12 +301,12 @@ def compute_dev_likelihoods_over_dpos(trials_path, results_df, sub, sess, result
 
 def compute_dev_likelihoods_over_rules(trials_path, results_df, sub, sess, pi_rule, results_save_path=None, inplace=False, cue_rule_lik=None):
     """Add the rule-based deviant-position prior to the deviant-position results, and the
-    likelihood weighted by it (`likelihood_obs_std_at_dev_over_rules`).
+    likelihood weighted by it (likelihood_obs_std_at_dev_over_rules).
 
-    The prior depends on the previous trial's rule through the transition matrix `pi_rule`. When
-    the trials have a `cue` column, the cue also informs the rule belief; the prior without the
-    cue is then kept for comparison in the `_nocue` columns.
-    cue_rule_lik: {cue -> {rule -> P(cue | rule)}}, only used with a `cue` column.
+    The prior depends on the previous trial's rule through the transition matrix pi_rule. When
+    the trials have a cue column, the cue also informs the rule belief; the prior without the
+    cue is then kept for comparison in the _nocue columns.
+    cue_rule_lik: {cue -> {rule -> P(cue | rule)}}, only used with a cue column.
     """
     if results_save_path is None:
         results_save_path = os.path.dirname(__file__)
@@ -363,7 +364,7 @@ def compute_dev_likelihoods_over_rules(trials_path, results_df, sub, sess, pi_ru
     return results_df
 
 
-# Above this value, `response_time_dev` is an absolute timestamp (~1e9 s) rather than an RT
+# Above this value, response_time_dev is an absolute timestamp (~1e9 s) rather than an RT
 _ABS_GETSECS_THRESHOLD = 1e6
 
 # Time between the onsets of two consecutive tones (tone duration 0.1 s + ISI 0.65 s)
@@ -386,8 +387,8 @@ def _first_float(x):
 def _concat_run_logs(logfiles_path, sub, sess, n_run=4):
     """Logfiles of all runs of one subject and session, concatenated in run order.
 
-    Handles both naming conventions: behavioural logs (`sub-XX-ses-N*runR*.tsv`) and fMRI event
-    logs (`sub-XX_ses-N*run-R*.tsv`).
+    Handles both naming conventions: behavioural logs (sub-XX-ses-N*runR*.tsv) and fMRI event
+    logs (sub-XX_ses-N*run-R*.tsv).
     """
     logy = []
     for r in range(0, n_run):
@@ -403,8 +404,8 @@ def _concat_run_logs(logfiles_path, sub, sess, n_run=4):
 def _deviant_rt(logs):
     """Reaction time to the deviant, for every logfile row.
 
-    Behavioural logs store it as `rt_getsecs_dev` (or `rt_getsecs`). fMRI logs store
-    `response_time_dev`, either as an absolute timestamp (sub-11; the run's trigger time is
+    Behavioural logs store it as rt_getsecs_dev (or rt_getsecs). fMRI logs store
+    response_time_dev, either as an absolute timestamp (sub-11; the run's trigger time is
     subtracted) or already relative to the deviant (sub-12/13); the two are told apart by
     magnitude.
     """
@@ -422,7 +423,7 @@ def _deviant_rt(logs):
 
 def _identified_dpos(key_pressed):
     """Deviant position named by each response key (NaN for no or unknown key); see
-    `_KEY_TO_DPOS`."""
+    _KEY_TO_DPOS."""
     def _pos(k):
         if k is None or (isinstance(k, float) and np.isnan(k)):
             return np.nan
@@ -477,7 +478,7 @@ def load_logs(logfiles_path, sub, sess, filter=False, n_run=4):
 def _correct_dpos_mask(df):
     """Boolean mask of the trials where the subject identified the deviant's position correctly.
 
-    The logfiles' `correct` column is coded differently across cohorts (numbers, words, or
+    The logfiles' correct column is coded differently across cohorts (numbers, words, or
     numbers read as strings in the fMRI logs), hence the test on both the number 1 and the word
     'correct'. Follows the paradigm's own scoring: right key pressed outside the response window
     ('too slow') counts as incorrect.
@@ -494,7 +495,7 @@ def _correct_dpos_mask(df):
 def compare_likelihoods_with_RTs(results_df, logfiles_path, sub, sess, RT_results_path=None, n_run=4):
     """Scatter of RT vs KF likelihood at the deviants, for one subject and session.
 
-    Early version, superseded by the multi-subject figures below: reads behavioural logs only and
+    Early version, replaced by the multi-subject figures below: reads behavioural logs only and
     ignores the global deviant-position prior.
     """
     if RT_results_path is None:
@@ -580,7 +581,7 @@ _AT_PRESSED_ALIASES = {
 def _response_locked_columns(df_all, df_trials_preds, pi_rule):
     """Likelihood and priors at the tone the subject's key named, instead of at the true deviant.
 
-    Response-locked counterparts of the deviant-locked columns (see `_AT_PRESSED_ALIASES`),
+    Response-locked counterparts of the deviant-locked columns (see _AT_PRESSED_ALIASES),
     computed with the same functions, so both agree on trials where the named tone is the
     deviant. NaN where no valid key was pressed.
     """
@@ -637,9 +638,9 @@ def aggregate_data(trials_path, logfiles_path, subject, session_num, likelihoods
     file_prefix: stem of the prediction files: 'kalman_predictions' (KF) or 'leaky_predictions'
         (LI).
     sigma_r: observation-noise std at which the KF predictions were computed (selects the file
-        suffixed `_sigma_r_{sigma_r}`); None for the KF with R fitted by EM, and for the LI.
-    allvalidtrials: response-locked mode: `rt` and the model columns are taken at the tone the
-        subject's key named (see `_response_locked_columns`).
+        suffixed _sigma_r_{sigma_r}); None for the KF with R fitted by EM, and for the LI.
+    allvalidtrials: response-locked mode: rt and the model columns are taken at the tone the
+        subject's key named (see _response_locked_columns).
     """
     suffix = _sigma_r_suffix(sigma_r)
 
@@ -663,7 +664,7 @@ def aggregate_data(trials_path, logfiles_path, subject, session_num, likelihoods
             p_no_dev=prob_null_trial(pi_rule))
         preds_liks_dev = compute_dev_likelihoods_over_rules(trials_file, preds_liks_dev, subject, session_num, pi_rule, results_save_path=None, inplace=False)
 
-        # Keep a single `trial_no` column (the one of `trials`), so the merges below don't fail
+        # Keep a single trial_no column (the one of trials), so the merges below don't fail
         if 'trial_no' in preds.columns:
             preds = preds.drop(columns=['trial_no'])
         if 'trial_no' in preds_liks_dev.columns:
@@ -690,7 +691,8 @@ def aggregate_data(trials_path, logfiles_path, subject, session_num, likelihoods
 
 
 def get_session_types(trials_path):
-    """Session types of the 04/05/06 cohort, read from the trials filenames.
+    """Session types of the subjects whose trials filenames carry the session parameters
+    (subjects 01 to 07, not 11/12/13).
 
     Returns the sorted list of (d, si_stat, si_r) configurations, and a dict mapping each
     configuration to {subject: session number}.
@@ -755,13 +757,13 @@ def _p_stars(p):
     return "ns"
 
 
-# Correlations available for the rho annotated on the RT figures (`corr`). Every R2 is computed
-# with Pearson, whatever `corr` is.
+# Correlations available for the rho annotated on the RT figures (corr). Every R2 is computed
+# with Pearson, whatever corr is.
 CORR_FUNCS = {'pearson': ss.pearsonr, 'spearman': ss.spearmanr}
 
 
 def _corr_stats(x, y, corr='pearson'):
-    """(rho, p-value) between x and y, Pearson or Spearman according to `corr`.
+    """(rho, p-value) between x and y, Pearson or Spearman according to corr.
 
     Only the Pearson rho squared is an R2.
     """
@@ -783,7 +785,7 @@ def _corr_suffix(corr='pearson'):
 
 
 def _fit_label(x, y, corr='pearson'):
-    """Legend label of a likelihood vs RT regression line: rho (per `corr`), the OLS R2 and
+    """Legend label of a likelihood vs RT regression line: rho (per corr), the OLS R2 and
     significance stars."""
     r, p = _corr_stats(x, y, corr)
     r_ols, _ = _corr_stats(x, y, 'pearson')
@@ -799,7 +801,8 @@ def compare_likelihoods_with_RTs_global(subjects, trials_path, preds_liks_path, 
     overlaying the KF and optionally the LI fits. Laid out for 3 subjects and 4 session types.
 
     take_dpos: use the likelihood weighted by the global deviant-position prior.
-    take_rules: also overlay the likelihood weighted by the rule-based prior.
+    take_rules: also plot the likelihood weighted by the rule-based prior (alone when
+        take_dpos=False).
     indiv_kf_sir: use the KF computed at each session's true observation-noise std (si_r);
         otherwise the KF with R fitted by EM.
     leaky_preds_path: if given, overlay the leaky integrator (LI) fits.
@@ -810,7 +813,7 @@ def compare_likelihoods_with_RTs_global(subjects, trials_path, preds_liks_path, 
     session_types, session_type_to_params = get_session_types(trials_path)
 
     fig, axs = plt.subplots(len(subjects), len(session_types), figsize=(12, 10), sharex=True, sharey=True)
-    plt.style.context('seaborn-poster')
+    plt.style.context('seaborn-poster') # TODO: convert to plt.style.use OR create "with plt....:" block
     sessions = []  # List to store session type parameters for column headers
 
     for j, session_type in tqdm(enumerate(session_types), desc="Session Type"):
@@ -951,7 +954,7 @@ def compare_likelihoods_with_RTs_global(subjects, trials_path, preds_liks_path, 
 
 
 def compare_likelihoods_with_RTs_global_indiv(subjects, trials_path, preds_liks_path, logfiles_path, comparison_save_path, pi_rule, take_dpos=True, take_rules=False, loglik=False, logrt=False, file_prefix='kalman_predictions', leaky_preds_path=None, leaky_file_prefix='leaky_predictions', correcttrials=False):
-    """Same figure as `compare_likelihoods_with_RTs_global`, with each session's KF likelihoods
+    """Same figure as compare_likelihoods_with_RTs_global, with each session's KF likelihoods
     computed at that session's own true observation-noise std (si_r)."""
 
     # Find unique session types (configurations of d, si_stat, si_r)
@@ -1096,7 +1099,7 @@ def compare_likelihoods_with_RTs_global_indiv(subjects, trials_path, preds_liks_
     print(f"Saved fig as {save_name}")
 
 
-# Models compared in the RT figures below. `src`: predictions the column is read from ('kf' or
+# Models compared in the RT figures below. src: predictions the column is read from ('kf' or
 # 'li'); the priors do not depend on the model and are read from the KF predictions.
 PER_RUN_MODELS = [
     {'name': 'KF',     'src': 'kf', 'col': 'likelihood_obs_std_at_dev'},
@@ -1124,7 +1127,7 @@ MODEL_COLORS = {
 
 
 def _model_colors(order=None):
-    """Colours of the models named in `order` (default: PER_RUN_MODELS order), from
+    """Colours of the models named in order (default: PER_RUN_MODELS order), from
     MODEL_COLORS."""
     if order is None:
         order = [m['name'] for m in PER_RUN_MODELS]
@@ -1133,7 +1136,7 @@ def _model_colors(order=None):
 
 
 def _rho_stars_annotation(ax, r, p, fontsize=9, color='black', corr='pearson'):
-    """Write rho and its significance stars in the top-left corner of `ax`."""
+    """Write rho and its significance stars in the top-left corner of ax."""
     val = TextArea(rf"{_corr_symbol(corr)}{r:.2f}", textprops=dict(color=color, size=fontsize))
     stars = TextArea(_p_stars(p), textprops=dict(color=color, size=fontsize, weight='bold'))
     box = HPacker(children=[val, stars], align="baseline", pad=0, sep=1)
@@ -1157,7 +1160,7 @@ def _select_rt_trials(df, logrt=True, correcttrials=False):
 
 
 def _sorted_subjects(subjects):
-    """Subjects in natural ASCENDING index order (numeric where possible, else lexical)."""
+    """Subjects in ascending index order (numeric where possible, else lexical)."""
     try:
         return sorted(subjects, key=lambda s: int(s))
     except (TypeError, ValueError):
@@ -1176,7 +1179,7 @@ def _subject_display_map(subjects):
 
 
 def _sub_label(subject_labels, sub):
-    """Publication label for `sub`: from `subject_labels` if given, else the raw 'Subject {sub}'."""
+    """Publication label for sub: from subject_labels if given, else the raw 'Subject {sub}'."""
     return (subject_labels or {}).get(sub) or f"Subject {sub}"
 
 
@@ -1187,8 +1190,8 @@ def _per_run_model_grid(groups, trials_path, logfiles_path, preds_liks_path, lea
                         save_prefix='', allvalidtrials=False, corr='pearson'):
     """Grid of RT vs likelihood scatters: one row per model (PER_RUN_MODELS), one column per run.
 
-    `groups` lists the (subject, session) blocks in column order, each a dict with `sub`,
-    `sess_num`, `sigma_r` (observation-noise std of the KF file) and `band` (header
+    groups lists the (subject, session) blocks in column order, each a dict with sub,
+    sess_num, sigma_r (observation-noise std of the KF file) and band (header
     naming the session's parameters). Within a block, runs are ordered by (tau_std, d).
     corr: correlation annotated in each cell (the regression line is OLS either way).
     """
@@ -1338,7 +1341,7 @@ def _per_subject_model_grid(subject_specs, trials_path, logfiles_path, preds_lik
     """Grid of RT vs likelihood scatters pooling all trials of each subject: one row per subject,
     one column per model.
 
-    `subject_specs` lists the subjects in row order, each a dict with `sub` and `sessions` (a list
+    subject_specs lists the subjects in row order, each a dict with sub and sessions (a list
     of {'sess_num', 'sigma_r'}, so each session's KF file is selected before pooling).
     """
     n_rows = len(subject_specs)
@@ -1466,7 +1469,7 @@ def _run_level_rt_means(d, xcol, loglik=False, err='sem'):
 
 def _plot_run_means_cell(ax, df_kf, df_li, m, color, loglik, err='sem', both_axes=True,
                        corr='pearson'):
-    """Plot one model's run means in `ax`: one dot per run with error bars, linked in likelihood
+    """Plot one model's run means in ax: one dot per run with error bars, linked in likelihood
     order, with a dashed OLS fit and the rho across runs.
 
     both_axes: error bars on x as well as y. Returns the y extent of the error bars (or None),
@@ -1508,9 +1511,9 @@ def _per_subject_runmean_grid(subject_specs, trials_path, logfiles_path, preds_l
                               correcttrials=False, err='sem', both_axes=True, subject_labels=None,
                               save_prefix='', allvalidtrials=False, corr='pearson'):
     """Grid of run-mean RT vs likelihood: one row per model, one column per subject, one dot per
-    run (see `_plot_run_means_cell`).
+    run (see _plot_run_means_cell).
 
-    `subject_specs` as in `_per_subject_model_grid`.
+    subject_specs as in _per_subject_model_grid.
     """
     n_cols = len(subject_specs)
     n_rows = len(PER_RUN_MODELS)
@@ -1684,7 +1687,7 @@ def compare_likelihoods_with_RTs_per_run_models(subjects, trials_path, preds_lik
 
 def _plot_rt_vs_likelihood_cell(ax, df_kf, df_li, m, color, loglik, scatter_kws, line_kws,
                              show_n=False, corr='pearson'):
-    """Plot one model's RT vs likelihood scatter in `ax`, with its regression line and rho.
+    """Plot one model's RT vs likelihood scatter in ax, with its regression line and rho.
 
     Returns the plotted RTs (or None), for the shared y-limit.
     """
@@ -1721,10 +1724,10 @@ def _per_run_and_subject_model_grid(subject_specs, groups, trials_path, logfiles
                                     correcttrials=False, subject_labels=None, save_prefix='',
                                     allvalidtrials=False, corr='pearson'):
     """Grid of RT vs likelihood scatters with one row per model: one pooled column per subject,
-    followed by the per-run columns of `_per_run_model_grid`.
+    followed by the per-run columns of _per_run_model_grid.
 
-    `subject_specs` and `groups` are the layouts of `_per_subject_model_grid` and
-    `_per_run_model_grid`.
+    subject_specs and groups are the layouts of _per_subject_model_grid and
+    _per_run_model_grid.
     """
     n_pooled = len(subject_specs)
     n_run_cols = len(groups) * n_run
@@ -1894,7 +1897,7 @@ def compare_likelihoods_with_RTs_per_run_and_subject_models(subjects, trials_pat
                                                             allvalidtrials=False,
                                                             corr='pearson'):
     """RT vs likelihood scatters for the 04/05/06 cohort, pooled per subject and per run in one
-    figure (see `_per_run_and_subject_model_grid`)."""
+    figure (see _per_run_and_subject_model_grid)."""
     session_types, session_type_to_params = get_session_types(trials_path)
 
     # Layouts of the pooled and per-run columns, in the same subject and session order
@@ -1926,10 +1929,10 @@ def compare_likelihoods_with_RTs_per_run_and_subject_models(subjects, trials_pat
 
 
 def _single_session_layout(subjects, sess_num=1, sigma_r=0.02):
-    """Layouts (`subject_specs`, `groups`) of the grid functions for the 11/12/13 cohort: one
-    session per subject, all at observation noise `sigma_r`.
+    """Layouts (subject_specs, groups) of the grid functions for the 11/12/13 cohort: one
+    session per subject, all at observation noise sigma_r.
 
-    Replaces `get_session_types`, which only reads the 04/05/06 filenames.
+    Replaces get_session_types, which needs the session parameters in the trials filenames.
     """
     subject_specs = [{'sub': sub,
                       'sessions': [{'sess_num': sess_num, 'sigma_r': sigma_r}]}
@@ -1946,7 +1949,7 @@ def compare_likelihoods_with_RTs_per_subject_models_single_session(
         leaky_preds_path, sess_num=1, sigma_r=0.02, logrt=True, loglik=False,
         leaky_file_prefix='leaky_predictions', figsize=None, correcttrials=False,
         allvalidtrials=False, corr='pearson'):
-    """11/12/13-cohort version of `compare_likelihoods_with_RTs_per_subject_models`."""
+    """11/12/13-cohort version of compare_likelihoods_with_RTs_per_subject_models."""
     subject_specs, _ = _single_session_layout(subjects, sess_num=sess_num, sigma_r=sigma_r)
     return _per_subject_model_grid(
         subject_specs, trials_path, logfiles_path, preds_liks_path, leaky_preds_path, pi_rule,
@@ -1961,7 +1964,7 @@ def compare_likelihoods_with_RTs_per_subject_runmeans_models_single_session(
         leaky_preds_path, sess_num=1, sigma_r=0.02, logrt=True, loglik=False,
         leaky_file_prefix='leaky_predictions', figsize=None, correcttrials=False,
         allvalidtrials=False, err='sem', both_axes=True, corr='pearson'):
-    """11/12/13-cohort version of `compare_likelihoods_with_RTs_per_subject_runmeans_models`.
+    """11/12/13-cohort version of compare_likelihoods_with_RTs_per_subject_runmeans_models.
 
     With only 4 runs per subject, the rho across runs is fragile.
     """
@@ -1980,7 +1983,7 @@ def compare_likelihoods_with_RTs_per_run_and_subject_models_single_session(
         leaky_preds_path, sess_num=1, sigma_r=0.02, n_run=4, logrt=True, loglik=False,
         leaky_file_prefix='leaky_predictions', figsize=None, correcttrials=False,
         allvalidtrials=False, corr='pearson'):
-    """11/12/13-cohort version of `compare_likelihoods_with_RTs_per_run_and_subject_models`."""
+    """11/12/13-cohort version of compare_likelihoods_with_RTs_per_run_and_subject_models."""
     subject_specs, groups = _single_session_layout(subjects, sess_num=sess_num, sigma_r=sigma_r)
     return _per_run_and_subject_model_grid(
         subject_specs, groups, trials_path, logfiles_path, preds_liks_path, leaky_preds_path,
@@ -1992,9 +1995,9 @@ def compare_likelihoods_with_RTs_per_run_and_subject_models_single_session(
 
 
 def compare_likelihoods_with_RTs_per_run_models_single_session(subjects, trials_path, preds_liks_path, logfiles_path, comparison_save_path, pi_rule, leaky_preds_path, sess_num=1, sigma_r=0.02, n_run=4, logrt=True, loglik=False, leaky_file_prefix='leaky_predictions', save_stem='RT_permodel_perrun', save_suffix='_trueobsnoise', figsize=(13, 12), correcttrials=False, allvalidtrials=False, corr='pearson'):
-    """11/12/13-cohort version of `compare_likelihoods_with_RTs_per_run_models` (8 x 12).
+    """11/12/13-cohort version of compare_likelihoods_with_RTs_per_run_models (8 x 12).
 
-    In this cohort `d` varies across runs and tau_std is not unique within a subject, so a column
+    In this cohort d varies across runs and tau_std is not unique within a subject, so a column
     position does not mean the same parameters across subjects: read each column's header. The
     rule-prior models use the cue-aware prior.
     """
@@ -2008,8 +2011,8 @@ def compare_likelihoods_with_RTs_per_run_models_single_session(subjects, trials_
         subject_labels=_subject_display_map(subjects), save_prefix=_subject_prefix(subjects))
 
 
-# Models of the likelihood histograms (top and bottom half of the figure). `row_color` indexes
-# `_model_colors()`, so each model has the same colour as in the RT figures.
+# Models of the likelihood histograms (top and bottom half of the figure). row_color indexes
+# _model_colors(), so each model has the same colour as in the RT figures.
 LIK_DIST_MODELS = [
     {'name': 'KF alone', 'src': 'kf', 'row_color': 0},
     {'name': 'LI alone', 'src': 'li', 'row_color': 1},
@@ -2027,10 +2030,10 @@ def _likelihood_dist_grid(groups, trials_path, logfiles_path, preds_liks_path, l
     """Histograms of the KF and LI likelihoods of every run, i.e. what the x-axis of the per-run
     RT figures contains.
 
-    Same data and trials as `_per_run_model_grid`. Runs are wrapped over `n_cols` columns, KF
+    Same data and trials as _per_run_model_grid with logrt=True (no response-locked option). Runs are wrapped over n_cols columns, KF
     histograms in the top half of the figure, LI ones in the bottom half. Each panel reports the
     median likelihood, the median |z| of the deviant under the standard prediction (bare
-    likelihood only) and the share of trials below `_LIK_ZERO_THRESHOLD`.
+    likelihood only) and the share of trials below _LIK_ZERO_THRESHOLD.
     lik_col: likelihood column to describe.
     loglik: log10 bins (default). The likelihood spans many orders of magnitude, so on the raw
         scale almost every trial falls in the first bin.
@@ -2046,7 +2049,7 @@ def _likelihood_dist_grid(groups, trials_path, logfiles_path, preds_liks_path, l
         return np.abs((df['observation'] - df['mu_pred_std_at_dev'])
                       / df['sigma_pred_std_at_dev']).to_numpy(dtype=float)
 
-    # Likelihoods of each run, with the same data, run order and trials as `_per_run_model_grid`
+    # Likelihoods of each run, with the same data, run order and trials as _per_run_model_grid
     records = []  # one entry per run, in figure order
     for g in tqdm(groups, desc="Subject/session"):
         sub, sess_num = g['sub'], g['sess_num']
@@ -2234,7 +2237,7 @@ def plot_likelihood_distributions_per_run_single_session(
         correcttrials=False):
     """Per-run KF and LI likelihood histograms for the 11/12/13 cohort.
 
-    save_suffix: defaults to `_sigma_r_{sigma_r}`.
+    save_suffix: defaults to _sigma_r_{sigma_r}.
     """
     if save_suffix is None:
         save_suffix = _sigma_r_suffix(sigma_r)
@@ -2258,8 +2261,8 @@ def _get_perrun_models_R2(groups, trials_path, logfiles_path, preds_liks_path,
     """Table of the R2 of every (run, model) cell of the per-run RT figure, used by the violin
     and Cohen's d figures.
 
-    Same data, run ordering and trials as `_per_run_model_grid`; `groups` as there, with an
-    optional `meta` dict copied into every row. R2 is always the OLS one (Pearson rho squared).
+    Same data, run ordering and trials as _per_run_model_grid; groups as there, with an
+    optional meta dict copied into every row. R2 is always the OLS one (Pearson rho squared).
     Cells with fewer than 3 points are skipped.
     Returns one row per cell: model, R2, rho, p, corr, sub, sess_num, run_n, run_idx, tau, d,
     n_points (+ meta).
@@ -2273,7 +2276,7 @@ def _get_perrun_models_R2(groups, trials_path, logfiles_path, preds_liks_path,
         df_li = aggregate_data(trials_path, logfiles_path, sub, sess_num, leaky_preds_path,
                                pi_rule, file_prefix=leaky_file_prefix, allvalidtrials=allvalidtrials)
 
-        # Runs ordered as in `_per_run_model_grid`
+        # Runs ordered as in _per_run_model_grid
         run_keys = df_kf.groupby('run_n')[['tau_std', 'd']].first().sort_values(['tau_std', 'd'])
         assert len(run_keys) == n_run, (
             f"sub {sub} ses {sess_num}: found {len(run_keys)} runs, expected {n_run}")
@@ -2314,7 +2317,7 @@ def _get_perrun_models_R2(groups, trials_path, logfiles_path, preds_liks_path,
 def get_perrun_models_R2(subjects, trials_path, preds_liks_path, logfiles_path, pi_rule,
                              leaky_preds_path, n_run=4, logrt=True, loglik=False,
                              correcttrials=False, allvalidtrials=False):
-    """Per-run R2 table for the 04/05/06 cohort (see `_get_perrun_models_R2`), with the
+    """Per-run R2 table for the 04/05/06 cohort (see _get_perrun_models_R2), with the
     session-type parameters added as d_par, si_stat and si_r."""
     session_types, session_type_to_params = get_session_types(trials_path)
 
@@ -2343,7 +2346,7 @@ def get_perrun_models_R2_single_session(subjects, trials_path, preds_liks_path, 
                                             n_run=4, logrt=True, loglik=False,
                                             leaky_file_prefix='leaky_predictions',
                                             correcttrials=False, allvalidtrials=False):
-    """Per-run R2 table for the 11/12/13 cohort (see `_get_perrun_models_R2`)."""
+    """Per-run R2 table for the 11/12/13 cohort (see _get_perrun_models_R2)."""
     groups = [{
         'sub': sub,
         'sess_num': sess_num,
@@ -2359,10 +2362,10 @@ def get_perrun_models_R2_single_session(subjects, trials_path, preds_liks_path, 
 
 def _plot_perrun_models_R2_violins_on_ax(ax, df, logrt=True, loglik=False,
                                          order=None, palette=None, show_xticklabels=True):
-    """Plot one violin per model of its per-run R2 in `ax`, with the individual values and the
+    """Plot one violin per model of its per-run R2 in ax, with the individual values and the
     mean.
 
-    `order` and `palette` let several panels share the model order and colours. Returns the
+    order and palette let several panels share the model order and colours. Returns the
     number of runs per model.
     """
     if order is None:
@@ -2403,8 +2406,8 @@ def _plot_perrun_models_R2_violins_on_ax(ax, df, logrt=True, loglik=False,
 
 def _plot_perrun_models_R2_violins(df, comparison_save_path, save_stem, save_suffix='',
                                    logrt=True, loglik=False):
-    """Plot and save the per-run R2 violins, all subjects pooled; `df` comes from
-    `_get_perrun_models_R2`."""
+    """Plot and save the per-run R2 violins, all subjects pooled; df comes from
+    _get_perrun_models_R2."""
     fig, ax = plt.subplots(figsize=(12, 6))
     _plot_perrun_models_R2_violins_on_ax(ax, df, logrt=logrt, loglik=loglik)
     plt.tight_layout()
@@ -2421,8 +2424,8 @@ def _check_R2_table(df, subjects=None, R2_function='get_perrun_models_R2'):
     Pearson.
 
     An empty table usually means the R2 function does not match the cohort (11/12/13 needs
-    `get_perrun_models_R2_single_session`). The Pearson check rejects tables from older
-    versions of this module, where R2 could be a squared Spearman rho.
+    get_perrun_models_R2_single_session). The Pearson check uses the table's corr column, so
+    a table without it is not checked.
     """
     if len(df) == 0:
         raise ValueError(
@@ -2435,7 +2438,6 @@ def _check_R2_table(df, subjects=None, R2_function='get_perrun_models_R2'):
     if missing:
         raise ValueError(f"R2 table has no rows for subject(s) {missing} "
                          f"(present: {sorted(set(df['sub']))}).")
-    # Older tables have no `corr` column
     if 'corr' in df.columns:
         found = sorted(set(df['corr'].dropna()))
         if found != ['pearson']:
@@ -2501,7 +2503,7 @@ def plot_perrun_models_R2_violins_per_subject(subjects, trials_path, preds_liks_
                                               leaky_preds_path, n_run=4, logrt=True, loglik=False,
                                               correcttrials=False,
                                               allvalidtrials=False, df=None):
-    """Per-subject version of `plot_perrun_models_R2_violins`.
+    """Per-subject version of plot_perrun_models_R2_violins.
 
     df: an R2 table already computed (e.g. for the 11/12/13 cohort), which skips its computation.
     """
@@ -2526,7 +2528,7 @@ def plot_perrun_models_R2_violins_single_session(subjects, trials_path, preds_li
                                                  leaky_file_prefix='leaky_predictions',
                                                  save_stem='RT_perrun_8models_R2_violins_sub11-12-13',
                                                  save_suffix='_cueprior', correcttrials=False):
-    """11/12/13-cohort version of `plot_perrun_models_R2_violins` (12 runs per violin)."""
+    """11/12/13-cohort version of plot_perrun_models_R2_violins (12 runs per violin)."""
     df = get_perrun_models_R2_single_session(
         subjects, trials_path, preds_liks_path, logfiles_path, pi_rule, leaky_preds_path,
         sess_num=sess_num, sigma_r=sigma_r, n_run=n_run, logrt=logrt, loglik=loglik,
@@ -2539,11 +2541,11 @@ def plot_perrun_models_R2_violins_single_session(subjects, trials_path, preds_li
     return save_name, df
 
 
-def _cohens_d_paired(a, b):
-    """Cohen's d between two models' per-run R2: (mean(a) - mean(b)) / pooled SD.
+def _cohens_d_paired_wrong(a, b):
+    """Cohen's d between two models' R2: (mean(a) - mean(b)) / pooled SD.
 
-    This compares the two distributions; the run pairing is only used by the Wilcoxon test
-    reported alongside.
+    This compares the two distributions, not paired by run, and assuming indepdendent samples.
+    Was used in poster figures.
     """
     a = np.asarray(a, dtype=float)
     b = np.asarray(b, dtype=float)
@@ -2552,6 +2554,19 @@ def _cohens_d_paired(a, b):
     if s_pooled == 0:
         return np.nan
     return (a.mean() - b.mean()) / s_pooled
+
+def _cohens_d_paired(a, b):
+    """Cohen's d (d_z) of the per-run R2 difference between two models: mean(a - b) divided by
+    the standard deviation of (a - b). a and b hold the R2 of the two models in the same runs,
+    in the same order.
+    This matches the Wilcoxon signed-rank test better: we have pairs of model fits per run.
+    """
+    differences = np.asarray(a, dtype=float) - np.asarray(b, dtype=float)
+    sd_differences = np.std(differences, ddof=1)
+    if sd_differences == 0:
+        return np.nan
+    return differences.mean() / sd_differences
+
 
 
 def _model_R2_cohensd_matrices(df, order):
@@ -2588,10 +2603,10 @@ def _model_R2_cohensd_matrices(df, order):
 
 
 def _plot_model_R2_cohensd_heatmap_on_ax(ax, D, P, order, vmax, show_yticklabels=True):
-    """Plot the Cohen's d matrix as a heatmap in `ax` (red: the row model explains RT better),
+    """Plot the Cohen's d matrix as a heatmap in ax (red: the row model explains RT better),
     with d and the Wilcoxon stars in each cell.
 
-    `vmax` sets the symmetric colour scale, so several panels can share it. Returns the image,
+    vmax sets the symmetric colour scale, so several panels can share it. Returns the image,
     for the colorbar.
     """
     n = len(order)
@@ -2632,8 +2647,8 @@ def _plot_model_R2_cohensd_heatmap_on_ax(ax, D, P, order, vmax, show_yticklabels
 
 def _plot_model_R2_cohensd_heatmap(df, comparison_save_path, save_stem, save_suffix='',
                                    logrt=True, loglik=False):
-    """Plot and save the Cohen's d heatmap, all subjects pooled; `df` comes from
-    `_get_perrun_models_R2`. Returns (save_name, D, P)."""
+    """Plot and save the Cohen's d heatmap, all subjects pooled; df comes from
+    _get_perrun_models_R2. Returns (save_name, D, P)."""
     order = [m['name'] for m in PER_RUN_MODELS]
     D, P, N = _model_R2_cohensd_matrices(df, order)
 
@@ -2790,10 +2805,10 @@ def plot_model_R2_cohensd_heatmap_per_subject(subjects, trials_path, preds_liks_
                                               leaky_preds_path, n_run=4, logrt=True, loglik=False,
                                               correcttrials=False,
                                               allvalidtrials=False, df=None, scale=1.0):
-    """Per-subject version of `plot_model_R2_cohensd_heatmap`.
+    """Per-subject version of plot_model_R2_cohensd_heatmap.
 
     df: an R2 table already computed (e.g. for the 11/12/13 cohort), which skips its computation.
-    scale: see `_plot_model_R2_cohensd_heatmap_per_subject`.
+    scale: see _plot_model_R2_cohensd_heatmap_per_subject.
     """
     if df is None:
         df = get_perrun_models_R2(
@@ -2814,7 +2829,7 @@ def plot_model_R2_cohensd_heatmap_and_violins_per_subject(
         correcttrials=False, allvalidtrials=False, df=None, figsize=None,
         width_ratios=(5.4, 4.6), row_height=3.5, scale=1.0):
     """Per-subject R2 violins and Cohen's d heatmaps in one figure (see
-    `_plot_model_R2_cohensd_heatmap_and_violins_per_subject`). Returns (save_name, df).
+    _plot_model_R2_cohensd_heatmap_and_violins_per_subject). Returns (save_name, df).
 
     df: an R2 table already computed, which skips its computation.
     """
@@ -2840,7 +2855,7 @@ def plot_model_R2_cohensd_heatmap_single_session(subjects, trials_path, preds_li
                                                  leaky_file_prefix='leaky_predictions',
                                                  save_stem='RT_perrun_8models_R2_cohensd_heatmap_sub11-12-13',
                                                  save_suffix='_cueprior', correcttrials=False):
-    """11/12/13-cohort version of `plot_model_R2_cohensd_heatmap`.
+    """11/12/13-cohort version of plot_model_R2_cohensd_heatmap.
 
     With only 12 paired runs, the Wilcoxon test has little power: read d first.
     """
